@@ -2,6 +2,7 @@ from flask import Flask, jsonify, send_from_directory
 from tinkoff.invest import Client, CandleInterval
 from datetime import datetime, timedelta, timezone
 import pandas as pd
+import os
 
 app = Flask(__name__, static_folder="static")
 
@@ -165,51 +166,79 @@ TIMEFRAMES = {
     "1h": CandleInterval.CANDLE_INTERVAL_HOUR
 }
 
+# Функция для расчета RSI
 def compute_rsi(prices, period=14):
-    df = pd.DataFrame(prices, columns=["close"])
-    delta = df["close"].diff()
+    if len(prices) < period:
+        return None
+    series = pd.Series(prices)
+    delta = series.diff()
     up = delta.clip(lower=0)
     down = -delta.clip(upper=0)
     roll_up = up.ewm(alpha=1/period, adjust=False).mean()
     roll_down = down.ewm(alpha=1/period, adjust=False).mean()
     rs = roll_up / roll_down
     rsi = 100 - (100 / (1 + rs))
-    return round(rsi.iloc[-1], 2) if not rsi.empty else None
+    return round(rsi.iloc[-1], 2)
 
-def fetch_rsi():
+# Функция получения свечей с обработкой ошибок
+def get_candles_safe(client, figi, interval, lookback_minutes):
+    try:
+        now = datetime.now(timezone.utc)
+        candles = client.market_data.get_candles(
+            figi=figi,
+            from_=now - timedelta(minutes=lookback_minutes),
+            to=now,
+            interval=interval
+        ).candles
+        return candles
+    except Exception as e:
+        print(f"Ошибка запроса свечей {figi} ({interval}): {e}")
+        return []
+
+# Основная функция получения RSI по всем инструментам
+def fetch_rsi_data():
     results = {}
     with Client(TOKEN) as client:
         for name, figi in INSTRUMENTS.items():
             results[name] = {}
             for tf_name, interval in TIMEFRAMES.items():
-                try:
-                    now = datetime.now(timezone.utc)
-                    start = now - timedelta(days=30)
-                    candles = client.market_data.get_candles(
-                        figi=figi,
-                        from_=start,
-                        to=now,
-                        interval=interval
-                    ).candles
-                    if not candles:
-                        results[name][tf_name] = {"RSI": "-", "time": "-"}
-                        continue
-
-                    closes = [c.close.units + c.close.nano/1e9 for c in candles]
-                    rsi_val = compute_rsi(closes)
-                    last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
-                    results[name][tf_name] = {"RSI": rsi_val, "time": last_time}
-                except:
+                # Безопасное ограничение lookback
+                lookback = 500 if tf_name == "5m" else 200
+                candles = get_candles_safe(client, figi, interval, lookback)
+                
+                if not candles or len(candles) < 15:
                     results[name][tf_name] = {"RSI": "-", "time": "-"}
+                    continue
+
+                prices = [c.close.units + c.close.nano / 1e9 for c in candles]
+                
+                # Подставляем актуальную цену последней свечи
+                try:
+                    last_price_resp = client.market_data.get_last_prices(figi=[figi])
+                    if last_price_resp.last_prices:
+                        current_price = (
+                            last_price_resp.last_prices[0].price.units
+                            + last_price_resp.last_prices[0].price.nano / 1e9
+                        )
+                        prices[-1] = current_price
+                except:
+                    pass
+
+                rsi_val = compute_rsi(prices)
+                last_time = candles[-1].time.astimezone(
+                    timezone(timedelta(hours=3))
+                ).strftime("%Y-%m-%d %H:%M:%S")
+                results[name][tf_name] = {"RSI": rsi_val if rsi_val else "-", "time": last_time}
     return results
 
 @app.route("/api/rsi")
 def api_rsi():
-    return jsonify(fetch_rsi())
+    data = fetch_rsi_data()
+    return jsonify(data)
 
 @app.route("/")
 def index():
-    return send_from_directory(app.static_folder, "index.html")
+    return send_from_directory(os.getcwd(), "index.html")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
