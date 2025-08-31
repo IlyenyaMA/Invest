@@ -1,3 +1,11 @@
+from flask import Flask, jsonify, send_from_directory
+from tinkoff.invest import Client, CandleInterval
+from datetime import datetime, timedelta, timezone
+import pandas as pd
+import os
+
+app = Flask(__name__)
+
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
 INSTRUMENTS = {
@@ -152,3 +160,65 @@ INSTRUMENTS = {
     "Хэдхантер": "TCS20A107662",
     "Озон фарма": "TCS00A109B25"
 }
+def compute_rsi(prices, period=14):
+    df = pd.DataFrame(prices, columns=["close"])
+    df["diff"] = df["close"].diff()
+    df["gain"] = df["diff"].clip(lower=0)
+    df["loss"] = -df["diff"].clip(upper=0)
+    avg_gain = df["gain"].rolling(window=period, min_periods=period).mean()
+    avg_loss = df["loss"].rolling(window=period, min_periods=period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return round(rsi.iloc[-1], 2) if not rsi.empty else None
+
+def get_candles(figi, interval, lookback_minutes=2000):
+    now = datetime.now(timezone.utc)
+    with Client(TOKEN) as client:
+        candles = client.market_data.get_candles(
+            figi=figi,
+            from_=now - timedelta(minutes=lookback_minutes),
+            to=now,
+            interval=interval
+        ).candles
+    return candles
+
+def fetch_rsi_data():
+    results = {}
+    for name, figi in FIGI_LIST.items():
+        results[name] = {}
+        try:
+            # 5 минут
+            candles_5m = get_candles(figi, CandleInterval.CANDLE_INTERVAL_5_MIN)
+            prices_5m = [candle.close.units + candle.close.nano/1e9 for candle in candles_5m]
+            rsi_5m = compute_rsi(prices_5m)
+            time_5m = candles_5m[-1].time.strftime("%Y-%m-%d %H:%M") if candles_5m else "-"
+
+            # 1 час
+            candles_1h = get_candles(figi, CandleInterval.CANDLE_INTERVAL_HOUR)
+            prices_1h = [candle.close.units + candle.close.nano/1e9 for candle in candles_1h]
+            rsi_1h = compute_rsi(prices_1h)
+            time_1h = candles_1h[-1].time.strftime("%Y-%m-%d %H:%M") if candles_1h else "-"
+
+            results[name] = {
+                "5m": {"RSI": rsi_5m if rsi_5m else "-", "time": time_5m},
+                "1h": {"RSI": rsi_1h if rsi_1h else "-", "time": time_1h},
+            }
+        except Exception as e:
+            results[name] = {
+                "5m": {"RSI": "-", "time": "-"},
+                "1h": {"RSI": "-", "time": "-"},
+                "error": str(e)
+            }
+    return results
+
+@app.route("/api/rsi")
+def api_rsi():
+    data = fetch_rsi_data()
+    return jsonify(data)
+
+@app.route("/")
+def index():
+    return send_from_directory(os.getcwd(), "index.html")
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
