@@ -168,9 +168,9 @@ TIMEFRAMES = {
 
 # ===================
 def get_days_for_interval(tf_name):
-    if tf_name in ["5m"]:
+    if tf_name == "5m":
         return 7
-    elif tf_name in ["1h"]:
+    elif tf_name == "1h":
         return 60
     elif tf_name == "1d":
         return 365
@@ -197,7 +197,7 @@ def get_rsi(client, figi, tf_name, interval):
             to=now,
             interval=interval
         ).candles
-    except Exception as e:
+    except Exception:
         return None, None
 
     if not candles or len(candles) < 15:
@@ -230,28 +230,27 @@ st.title("📊 RSI монитор для акций Мосбиржи")
 
 tf_choice = st.selectbox("Выбери таймфрейм", list(TIMEFRAMES.keys()), index=1)
 
-results = {}
-with Client(TOKEN) as client:
-    for name, figi in INSTRUMENTS.items():
-        val, last_time = get_rsi(client, figi, tf_choice, TIMEFRAMES[tf_choice])
-        if val is not None:
-            results[name] = {"RSI": val, "Время": last_time}
-        else:
-            results[name] = {"RSI": None, "Время": "-"}
+if st.button("🔍 Посчитать RSI"):
+    results = {}
+    with Client(TOKEN) as client:
+        for name, figi in INSTRUMENTS.items():
+            val, last_time = get_rsi(client, figi, tf_choice, TIMEFRAMES[tf_choice])
+            if val is not None:
+                results[name] = {"RSI": val, "Время": last_time}
+            else:
+                results[name] = {"RSI": None, "Время": "-"}
 
-df = pd.DataFrame(results).T
+    df = pd.DataFrame(results).T
+    df_sorted = df.sort_values(by="RSI", ascending=True)
 
-# сортировка
-df_sorted = df.sort_values(by="RSI", ascending=True)
-
-# подсветка RSI
-def color_rsi(val):
-    if pd.isna(val):
+    # подсветка RSI
+    def color_rsi(val):
+        if pd.isna(val):
+            return ""
+        if val < 30:
+            return "background-color: lightgreen"
+        elif val > 70:
+            return "background-color: lightcoral"
         return ""
-    if val < 30:
-        return "background-color: lightgreen"
-    elif val > 70:
-        return "background-color: pink"
-    return ""
 
-st.dataframe(df_sorted.style.applymap(color_rsi, subset=["RSI"]))
+    st.dataframe(df_sorted.style.applymap(color_rsi, subset=["RSI"]))
