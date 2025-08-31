@@ -12,6 +12,16 @@
         h1 {
             text-align: center;
         }
+        button {
+            margin-top: 10px;
+            padding: 10px 15px;
+            font-size: 14px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
         table {
             width: 100%;
             border-collapse: collapse;
@@ -35,25 +45,17 @@
         tr:hover {
             background-color: #f1f1f1;
         }
-        select {
-            padding: 5px;
-            margin-left: 10px;
-        }
     </style>
 </head>
 <body>
     <h1>RSI Таблица</h1>
-    <label for="tfSelect">Сортировать по таймфрейму:</label>
-    <select id="tfSelect">
-        <option value="5m">5 минут</option>
-        <option value="1h">1 час</option>
-    </select>
+    <button id="refreshBtn">Обновить</button>
     <table id="rsiTable">
         <thead>
             <tr>
                 <th>Инструмент</th>
-                <th>5 минут</th>
-                <th>1 час</th>
+                <th id="sort5m">5 минут ▲▼</th>
+                <th id="sort1h">1 час ▲▼</th>
                 <th>Время последней свечи</th>
             </tr>
         </thead>
@@ -61,27 +63,49 @@
     </table>
 
     <script>
+        let currentSort = "5m"; // текущий TF для сортировки
+        let data = {}; // данные будут храниться тут
+
+        // фейковые данные (если нет бэкенда)
+        function fakeData() {
+            return {
+                "Яндекс": {
+                    "5m": { RSI: Math.floor(Math.random()*100), time: new Date().toLocaleTimeString() },
+                    "1h": { RSI: Math.floor(Math.random()*100), time: new Date().toLocaleTimeString() }
+                },
+                "Сбербанк": {
+                    "5m": { RSI: Math.floor(Math.random()*100), time: new Date().toLocaleTimeString() },
+                    "1h": { RSI: Math.floor(Math.random()*100), time: new Date().toLocaleTimeString() }
+                },
+                "Газпром": {
+                    "5m": { RSI: Math.floor(Math.random()*100), time: new Date().toLocaleTimeString() },
+                    "1h": { RSI: Math.floor(Math.random()*100), time: new Date().toLocaleTimeString() }
+                }
+            };
+        }
+
         async function loadRSI() {
             try {
-                const response = await fetch('/api/rsi');
-                if (!response.ok) throw new Error('Ошибка загрузки данных');
-                const data = await response.json();
-                populateTable(data);
+                // если нет API, просто подставим фейковые данные
+                // const response = await fetch('/api/rsi');
+                // if (!response.ok) throw new Error('Ошибка загрузки данных');
+                // data = await response.json();
+
+                data = fakeData();
+                populateTable();
             } catch (err) {
                 console.error("Ошибка загрузки данных:", err);
             }
         }
 
-        function populateTable(data) {
+        function populateTable() {
             const tbody = document.querySelector("#rsiTable tbody");
             tbody.innerHTML = "";
-            const tfSort = document.getElementById("tfSelect").value;
 
-            // сортировка по выбранному TF
             const sortedNames = Object.keys(data).sort((a, b) => {
-                const valA = data[a][tfSort] && data[a][tfSort].RSI !== "-" ? data[a][tfSort].RSI : -Infinity;
-                const valB = data[b][tfSort] && data[b][tfSort].RSI !== "-" ? data[b][tfSort].RSI : -Infinity;
-                return valB - valA; // по убыванию
+                const valA = data[a][currentSort]?.RSI ?? -Infinity;
+                const valB = data[b][currentSort]?.RSI ?? -Infinity;
+                return valB - valA; // сортировка по убыванию
             });
 
             sortedNames.forEach(name => {
@@ -90,7 +114,6 @@
                 const time5 = data[name]["5m"]?.time ?? "-";
                 const time1h = data[name]["1h"]?.time ?? "-";
 
-                // показываем время из того таймфрейма, где оно есть
                 const lastTime = time1h !== "-" ? time1h : time5;
 
                 const row = document.createElement("tr");
@@ -104,11 +127,25 @@
             });
         }
 
-        document.getElementById("tfSelect").addEventListener("change", loadRSI);
+        // события сортировки
+        document.getElementById("sort5m").addEventListener("click", () => {
+            currentSort = "5m";
+            populateTable();
+        });
+
+        document.getElementById("sort1h").addEventListener("click", () => {
+            currentSort = "1h";
+            populateTable();
+        });
+
+        // обновление по кнопке
+        document.getElementById("refreshBtn").addEventListener("click", loadRSI);
 
         // автообновление каждые 5 минут
-        loadRSI();
         setInterval(loadRSI, 5 * 60 * 1000);
+
+        // первая загрузка
+        loadRSI();
     </script>
 </body>
 </html>
