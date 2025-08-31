@@ -63,89 +63,60 @@
     </table>
 
     <script>
-        let currentSort = "5m"; // текущий TF для сортировки
-        let data = {}; // данные будут храниться тут
+let sortDirection = { "5m": true, "1h": true };
 
-        // фейковые данные (если нет бэкенда)
-        function fakeData() {
-            return {
-                "Яндекс": {
-                    "5m": { RSI: Math.floor(Math.random()*100), time: new Date().toLocaleTimeString() },
-                    "1h": { RSI: Math.floor(Math.random()*100), time: new Date().toLocaleTimeString() }
-                },
-                "Сбербанк": {
-                    "5m": { RSI: Math.floor(Math.random()*100), time: new Date().toLocaleTimeString() },
-                    "1h": { RSI: Math.floor(Math.random()*100), time: new Date().toLocaleTimeString() }
-                },
-                "Газпром": {
-                    "5m": { RSI: Math.floor(Math.random()*100), time: new Date().toLocaleTimeString() },
-                    "1h": { RSI: Math.floor(Math.random()*100), time: new Date().toLocaleTimeString() }
-                }
-            };
-        }
+function renderTable(data) {
+  const tbody = document.querySelector("#rsi-table tbody");
+  tbody.innerHTML = "";
 
-        async function loadRSI() {
-            try {
-                // если нет API, просто подставим фейковые данные
-                // const response = await fetch('/api/rsi');
-                // if (!response.ok) throw new Error('Ошибка загрузки данных');
-                // data = await response.json();
+  Object.entries(data).forEach(([instrument, values]) => {
+    const row = document.createElement("tr");
 
-                data = fakeData();
-                populateTable();
-            } catch (err) {
-                console.error("Ошибка загрузки данных:", err);
-            }
-        }
+    row.innerHTML = `
+      <td class="border px-4 py-2">${instrument}</td>
+      <td class="border px-4 py-2">${values["5m"].RSI}</td>
+      <td class="border px-4 py-2">${values["1h"].RSI}</td>
+      <td class="border px-4 py-2">${values["5m"].time}</td>
+    `;
+    tbody.appendChild(row);
+  });
+}
 
-        function populateTable() {
-            const tbody = document.querySelector("#rsiTable tbody");
-            tbody.innerHTML = "";
+function sortTable(tf) {
+  const tbody = document.querySelector("#rsi-table tbody");
+  const rows = Array.from(tbody.querySelectorAll("tr"));
 
-            const sortedNames = Object.keys(data).sort((a, b) => {
-                const valA = data[a][currentSort]?.RSI ?? -Infinity;
-                const valB = data[b][currentSort]?.RSI ?? -Infinity;
-                return valB - valA; // сортировка по убыванию
-            });
+  const idx = tf === "5m" ? 1 : 2; // колонка 5m или 1h
 
-            sortedNames.forEach(name => {
-                const rsi5 = data[name]["5m"]?.RSI ?? "-";
-                const rsi1h = data[name]["1h"]?.RSI ?? "-";
-                const time5 = data[name]["5m"]?.time ?? "-";
-                const time1h = data[name]["1h"]?.time ?? "-";
+  rows.sort((a, b) => {
+    const aVal = parseFloat(a.children[idx].innerText) || -Infinity;
+    const bVal = parseFloat(b.children[idx].innerText) || -Infinity;
 
-                const lastTime = time1h !== "-" ? time1h : time5;
+    return sortDirection[tf]
+      ? aVal - bVal
+      : bVal - aVal;
+  });
 
-                const row = document.createElement("tr");
-                row.innerHTML = `
-                    <td>${name}</td>
-                    <td>${rsi5}</td>
-                    <td>${rsi1h}</td>
-                    <td>${lastTime}</td>
-                `;
-                tbody.appendChild(row);
-            });
-        }
+  sortDirection[tf] = !sortDirection[tf]; // переключаем направление
 
-        // события сортировки
-        document.getElementById("sort5m").addEventListener("click", () => {
-            currentSort = "5m";
-            populateTable();
-        });
+  tbody.innerHTML = "";
+  rows.forEach(r => tbody.appendChild(r));
+}
 
-        document.getElementById("sort1h").addEventListener("click", () => {
-            currentSort = "1h";
-            populateTable();
-        });
+async function fetchData() {
+  const res = await fetch("/api/rsi");
+  const data = await res.json();
+  renderTable(data);
+}
 
-        // обновление по кнопке
-        document.getElementById("refreshBtn").addEventListener("click", loadRSI);
+// автообновление каждые 5 минут
+setInterval(fetchData, 5 * 60 * 1000);
 
-        // автообновление каждые 5 минут
-        setInterval(loadRSI, 5 * 60 * 1000);
+// кнопка ручного обновления
+document.getElementById("refresh-btn").addEventListener("click", fetchData);
 
-        // первая загрузка
-        loadRSI();
-    </script>
+// первый запуск
+fetchData();
+</script>
 </body>
 </html>
