@@ -2,6 +2,7 @@ from flask import Flask, jsonify, send_from_directory
 from tinkoff.invest import Client, CandleInterval
 from datetime import datetime, timedelta, timezone
 import pandas as pd
+import os
 
 app = Flask(__name__, static_folder='static')
 
@@ -225,3 +226,4 @@ def index():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
