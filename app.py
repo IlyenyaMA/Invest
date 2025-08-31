@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import os
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static")  # папка со статикой
 
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
@@ -160,6 +160,12 @@ INSTRUMENTS = {
     "Хэдхантер": "TCS20A107662",
     "Озон фарма": "TCS00A109B25"
 }
+
+TIMEFRAMES = {
+    "5m": CandleInterval.CANDLE_INTERVAL_5_MIN,
+    "1h": CandleInterval.CANDLE_INTERVAL_HOUR
+}
+
 def compute_rsi(prices, period=14):
     df = pd.DataFrame(prices, columns=["close"])
     df["diff"] = df["close"].diff()
@@ -184,20 +190,20 @@ def get_candles(figi, interval, lookback_minutes=2000):
 
 def fetch_rsi_data():
     results = {}
-    for name, figi in FIGI_LIST.items():
+    for name, figi in INSTRUMENTS.items():
         results[name] = {}
         try:
             # 5 минут
             candles_5m = get_candles(figi, CandleInterval.CANDLE_INTERVAL_5_MIN)
             prices_5m = [candle.close.units + candle.close.nano/1e9 for candle in candles_5m]
             rsi_5m = compute_rsi(prices_5m)
-            time_5m = candles_5m[-1].time.strftime("%Y-%m-%d %H:%M") if candles_5m else "-"
+            time_5m = candles_5m[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M") if candles_5m else "-"
 
             # 1 час
             candles_1h = get_candles(figi, CandleInterval.CANDLE_INTERVAL_HOUR)
             prices_1h = [candle.close.units + candle.close.nano/1e9 for candle in candles_1h]
             rsi_1h = compute_rsi(prices_1h)
-            time_1h = candles_1h[-1].time.strftime("%Y-%m-%d %H:%M") if candles_1h else "-"
+            time_1h = candles_1h[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M") if candles_1h else "-"
 
             results[name] = {
                 "5m": {"RSI": rsi_5m if rsi_5m else "-", "time": time_5m},
@@ -218,7 +224,7 @@ def api_rsi():
 
 @app.route("/")
 def index():
-    return send_from_directory(os.getcwd(), "index.html")
+    return send_from_directory(app.static_folder, "index.html")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
