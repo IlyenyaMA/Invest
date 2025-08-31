@@ -1,4 +1,3 @@
-streamlit
+flask
 pandas
-numpy
-tinkoff-investments
+tinkoff-invest

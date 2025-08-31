@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>RSI Таблица</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f0f2f5;
+        }
+        h1 {
+            text-align: center;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background: #fff;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        th, td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        tr:hover {
+            background-color: #f1f1f1;
+        }
+        select {
+            padding: 5px;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>RSI Таблица</h1>
+    <label for="tfSelect">Сортировать по таймфрейму:</label>
+    <select id="tfSelect">
+        <option value="5m">5 минут</option>
+        <option value="1h">1 час</option>
+    </select>
+    <table id="rsiTable">
+        <thead>
+            <tr>
+                <th>Инструмент</th>
+                <th>5 минут</th>
+                <th>1 час</th>
+                <th>Время последней свечи</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+        async function loadRSI() {
+            try {
+                const response = await fetch('/api/rsi');
+                if (!response.ok) throw new Error('Ошибка загрузки данных');
+                const data = await response.json();
+                populateTable(data);
+            } catch (err) {
+                console.error("Ошибка загрузки данных:", err);
+            }
+        }
+
+        function populateTable(data) {
+            const tbody = document.querySelector("#rsiTable tbody");
+            tbody.innerHTML = "";
+            const tfSort = document.getElementById("tfSelect").value;
+
+            // сортировка по выбранному TF
+            const sortedNames = Object.keys(data).sort((a, b) => {
+                const valA = data[a][tfSort]?.RSI !== "-" ? data[a][tfSort].RSI : -Infinity;
+                const valB = data[b][tfSort]?.RSI !== "-" ? data[b][tfSort].RSI : -Infinity;
+                return valB - valA; // по убыванию
+            });
+
+            sortedNames.forEach(name => {
+                const row = document.createElement("tr");
+                const rsi5 = data[name]["5m"]?.RSI ?? "-";
+                const rsi1h = data[name]["1h"]?.RSI ?? "-";
+                const time5 = data[name]["5m"]?.time ?? "-";
+                const time1h = data[name]["1h"]?.time ?? "-";
+
+                const lastTime = time5 !== "-" ? time5 : time1h;
+
+                row.innerHTML = `
+                    <td>${name}</td>
+                    <td>${rsi5}</td>
+                    <td>${rsi1h}</td>
+                    <td>${lastTime}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        document.getElementById("tfSelect").addEventListener("change", loadRSI);
+
+        // автообновление каждые 5 минут
+        loadRSI();
+        setInterval(loadRSI, 5 * 60 * 1000);
+    </script>
+</body>
+</html>
