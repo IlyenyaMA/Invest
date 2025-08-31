@@ -1,10 +1,10 @@
 import pandas as pd
+import streamlit as st
 from tinkoff.invest import Client, CandleInterval
 from datetime import datetime, timedelta, timezone
-from IPython.display import display, clear_output
-import ipywidgets as widgets
 
-# -------------------
+# ===================
+# НАСТРОЙКИ
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
 INSTRUMENTS = {
@@ -162,21 +162,18 @@ INSTRUMENTS = {
 
 TIMEFRAMES = {
     "5m": CandleInterval.CANDLE_INTERVAL_5_MIN,
-    # "15m": CandleInterval.CANDLE_INTERVAL_15_MIN,
     "1h": CandleInterval.CANDLE_INTERVAL_HOUR,
-    # "4h": CandleInterval.CANDLE_INTERVAL_4_HOUR,
-    # "1d": CandleInterval.CANDLE_INTERVAL_DAY
+    "1d": CandleInterval.CANDLE_INTERVAL_DAY,
 }
 
+# ===================
 def get_days_for_interval(tf_name):
-    if tf_name in ["5m", "15m"]:
+    if tf_name in ["5m"]:
         return 7
-    elif tf_name in ["1h", "4h"]:
+    elif tf_name in ["1h"]:
         return 60
     elif tf_name == "1d":
         return 365
-    elif tf_name == "1w":
-        return 5*365
     return 30
 
 def rsi(series, period=14):
@@ -201,16 +198,14 @@ def get_rsi(client, figi, tf_name, interval):
             interval=interval
         ).candles
     except Exception as e:
-        print(f"Ошибка для FIGI {figi} ({tf_name}): {e}")
         return None, None
 
     if not candles or len(candles) < 15:
         return None, None
 
-    # собираем цены закрытия
     closes = [c.close.units + c.close.nano / 1e9 for c in candles]
 
-    # берём актуальную цену вместо последней свечи
+    # обновляем последнюю цену
     try:
         last_price_resp = client.market_data.get_last_prices(figi=[figi])
         if last_price_resp.last_prices:
@@ -218,11 +213,10 @@ def get_rsi(client, figi, tf_name, interval):
                 last_price_resp.last_prices[0].price.units
                 + last_price_resp.last_prices[0].price.nano / 1e9
             )
-            closes[-1] = current_price  # заменяем последний close
-    except Exception as e:
-        print(f"Не удалось получить last_price для {figi}: {e}")
+            closes[-1] = current_price
+    except:
+        pass
 
-    # рассчитываем RSI
     rsi_val = round(rsi(pd.Series(closes)).iloc[-1], 2)
     last_time = candles[-1].time.astimezone(
         timezone(timedelta(hours=3))
@@ -230,65 +224,34 @@ def get_rsi(client, figi, tf_name, interval):
 
     return rsi_val, last_time
 
-def highlight_rsi(val):
-    try:
-        rsi_val = float(val.split(" ")[0])
-        if rsi_val < 30:
-            return "background-color: green"
-        if rsi_val > 70:
-            return "background-color: red"
-    except:
-        pass
-    return ""
+# ===================
+# Streamlit UI
+st.title("📊 RSI монитор для акций Мосбиржи")
 
-# -------------------
-# Сбор данных
+tf_choice = st.selectbox("Выбери таймфрейм", list(TIMEFRAMES.keys()), index=1)
+
 results = {}
-
 with Client(TOKEN) as client:
-    for name in INSTRUMENTS:
-        results[name] = {}
-    for tf_name, interval in TIMEFRAMES.items():
-        for name, figi in INSTRUMENTS.items():
-            val, last_time = get_rsi(client, figi, tf_name, interval)
-            if val is not None:
-                results[name][tf_name] = f"{val} ({last_time})"
-            else:
-                results[name][tf_name] = "-"
+    for name, figi in INSTRUMENTS.items():
+        val, last_time = get_rsi(client, figi, tf_choice, TIMEFRAMES[tf_choice])
+        if val is not None:
+            results[name] = {"RSI": val, "Время": last_time}
+        else:
+            results[name] = {"RSI": None, "Время": "-"}
 
 df = pd.DataFrame(results).T
 
-# -------------------
-# Виджеты для сортировки
-tf_sort_dropdown = widgets.Dropdown(
-    options=list(TIMEFRAMES.keys()),
-    value="1h",
-    description="Сортировать по:"
-)
-button_sort = widgets.Button(description="Сортировать")
-output_sort = widgets.Output()
+# сортировка
+df_sorted = df.sort_values(by="RSI", ascending=True)
 
-def extract_rsi(val):
-    """Извлекаем числовое значение RSI для сортировки"""
-    if val == "-" or val is None:
-        return float('inf')
-    try:
-        return float(val.split(" ")[0])
-    except:
-        return float('inf')
+# подсветка RSI
+def color_rsi(val):
+    if pd.isna(val):
+        return ""
+    if val < 30:
+        return "background-color: lightgreen"
+    elif val > 70:
+        return "background-color: pink"
+    return ""
 
-def on_sort_button_click(b):
-    with output_sort:
-        clear_output()
-        tf = tf_sort_dropdown.value
-        df_sorted = df.copy()
-        # Сортируем по выбранному TF с использованием loc (имена индекса)
-        df_sorted = df_sorted.loc[df_sorted[tf].map(extract_rsi).sort_values().index]
-        display(df_sorted.style.applymap(highlight_rsi))
-
-button_sort.on_click(on_sort_button_click)
-
-# -------------------
-print("RSI14 таблица (RSI14 + время последней свечи, МСК):")
-display(df.style.applymap(highlight_rsi))
-display(tf_sort_dropdown, button_sort, output_sort)
+st.dataframe(df_sorted.style.applymap(color_rsi, subset=["RSI"]))
