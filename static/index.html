@@ -79,20 +79,21 @@
 
             // сортировка по выбранному TF
             const sortedNames = Object.keys(data).sort((a, b) => {
-                const valA = data[a][tfSort]?.RSI !== "-" ? data[a][tfSort].RSI : -Infinity;
-                const valB = data[b][tfSort]?.RSI !== "-" ? data[b][tfSort].RSI : -Infinity;
+                const valA = data[a][tfSort] && data[a][tfSort].RSI !== "-" ? data[a][tfSort].RSI : -Infinity;
+                const valB = data[b][tfSort] && data[b][tfSort].RSI !== "-" ? data[b][tfSort].RSI : -Infinity;
                 return valB - valA; // по убыванию
             });
 
             sortedNames.forEach(name => {
-                const row = document.createElement("tr");
                 const rsi5 = data[name]["5m"]?.RSI ?? "-";
                 const rsi1h = data[name]["1h"]?.RSI ?? "-";
                 const time5 = data[name]["5m"]?.time ?? "-";
                 const time1h = data[name]["1h"]?.time ?? "-";
 
-                const lastTime = time5 !== "-" ? time5 : time1h;
+                // показываем время из того таймфрейма, где оно есть
+                const lastTime = time1h !== "-" ? time1h : time5;
 
+                const row = document.createElement("tr");
                 row.innerHTML = `
                     <td>${name}</td>
                     <td>${rsi5}</td>
