@@ -2,9 +2,8 @@ from flask import Flask, jsonify, send_from_directory
 from tinkoff.invest import Client, CandleInterval
 from datetime import datetime, timedelta, timezone
 import pandas as pd
-import os
 
-app = Flask(__name__, static_folder='static')
+app = Flask(__name__, static_folder="static")
 
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
@@ -166,14 +165,7 @@ TIMEFRAMES = {
     "1h": CandleInterval.CANDLE_INTERVAL_HOUR
 }
 
-LOOKBACK = {
-    "5m": 7 * 24 * 60,   # 7 дней в минутах
-    "1h": 60 * 24 * 60,  # 60 дней в минутах
-}
-
 def compute_rsi(prices, period=14):
-    if len(prices) < period:
-        return None
     df = pd.DataFrame(prices, columns=["close"])
     delta = df["close"].diff()
     up = delta.clip(lower=0)
@@ -182,48 +174,42 @@ def compute_rsi(prices, period=14):
     roll_down = down.ewm(alpha=1/period, adjust=False).mean()
     rs = roll_up / roll_down
     rsi = 100 - (100 / (1 + rs))
-    return round(rsi.iloc[-1], 2)
+    return round(rsi.iloc[-1], 2) if not rsi.empty else None
 
-def get_candles(figi, interval, minutes):
-    now = datetime.now(timezone.utc)
-    start = now - timedelta(minutes=minutes)
-    try:
-        with Client(TOKEN) as client:
-            candles = client.market_data.get_candles(
-                figi=figi,
-                from_=start,
-                to=now,
-                interval=interval
-            ).candles
-        return candles
-    except Exception as e:
-        print(f"Ошибка получения свечей для {figi}: {e}")
-        return []
-
-def fetch_rsi_data():
+def fetch_rsi():
     results = {}
-    for name, figi in INSTRUMENTS.items():
-        results[name] = {}
-        for tf, interval in TIMEFRAMES.items():
-            candles = get_candles(figi, interval, LOOKBACK[tf])
-            if candles:
-                prices = [c.close.units + c.close.nano / 1e9 for c in candles]
-                rsi_val = compute_rsi(prices)
-                last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
-                results[name][tf] = {"RSI": rsi_val if rsi_val is not None else "-", "time": last_time}
-            else:
-                results[name][tf] = {"RSI": "-", "time": "-"}
+    with Client(TOKEN) as client:
+        for name, figi in INSTRUMENTS.items():
+            results[name] = {}
+            for tf_name, interval in TIMEFRAMES.items():
+                try:
+                    now = datetime.now(timezone.utc)
+                    start = now - timedelta(days=30)
+                    candles = client.market_data.get_candles(
+                        figi=figi,
+                        from_=start,
+                        to=now,
+                        interval=interval
+                    ).candles
+                    if not candles:
+                        results[name][tf_name] = {"RSI": "-", "time": "-"}
+                        continue
+
+                    closes = [c.close.units + c.close.nano/1e9 for c in candles]
+                    rsi_val = compute_rsi(closes)
+                    last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
+                    results[name][tf_name] = {"RSI": rsi_val, "time": last_time}
+                except:
+                    results[name][tf_name] = {"RSI": "-", "time": "-"}
     return results
 
 @app.route("/api/rsi")
 def api_rsi():
-    data = fetch_rsi_data()
-    return jsonify(data)
+    return jsonify(fetch_rsi())
 
 @app.route("/")
 def index():
-    return send_from_directory(os.getcwd(), "index.html")
+    return send_from_directory(app.static_folder, "index.html")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
