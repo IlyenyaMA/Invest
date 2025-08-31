@@ -1,3 +1,4 @@
 flask
 pandas
 tinkoff-investments
+gunicorn
