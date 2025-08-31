@@ -165,11 +165,16 @@ TIMEFRAMES = {
     "1h": CandleInterval.CANDLE_INTERVAL_HOUR
 }
 
+LOOKBACK = {
+    "5m": 3,   # 3 дня для 5 минут
+    "1h": 30   # 30 дней для 1 часа
+}
+
 def compute_rsi(prices, period=14):
     if len(prices) < period:
         return None
-    series = pd.Series(prices)
-    delta = series.diff()
+    df = pd.DataFrame(prices, columns=["close"])
+    delta = df["close"].diff()
     up = delta.clip(lower=0)
     down = -delta.clip(upper=0)
     roll_up = up.ewm(alpha=1/period, adjust=False).mean()
@@ -178,36 +183,42 @@ def compute_rsi(prices, period=14):
     rsi = 100 - (100 / (1 + rs))
     return round(rsi.iloc[-1], 2)
 
-def get_candles(figi, interval, lookback_days=30):
+def get_rsi(client, figi, tf_name):
+    interval = TIMEFRAMES[tf_name]
+    days = LOOKBACK[tf_name]
     now = datetime.now(timezone.utc)
-    start = now - timedelta(days=lookback_days)
-    with Client(TOKEN) as client:
-        try:
-            candles = client.market_data.get_candles(
-                figi=figi,
-                from_=start,
-                to=now,
-                interval=interval
-            ).candles
-            return candles
-        except:
-            return []
+    start = now - timedelta(days=days)
+    try:
+        candles = client.market_data.get_candles(
+            figi=figi,
+            from_=start,
+            to=now,
+            interval=interval
+        ).candles
+    except:
+        return None, None
 
-def fetch_rsi_data():
-    results = {}
-    for name, figi in INSTRUMENTS.items():
-        results[name] = {}
-        for tf_name, interval in TIMEFRAMES.items():
-            candles = get_candles(figi, interval)
-            closes = [c.close.units + c.close.nano/1e9 for c in candles]
-            rsi_val = compute_rsi(closes) if closes else "-"
-            last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M") if candles else "-"
-            results[name][tf_name] = {"RSI": rsi_val, "time": last_time}
-    return results
+    if not candles:
+        return None, None
+
+    closes = [c.close.units + c.close.nano / 1e9 for c in candles]
+    rsi_val = compute_rsi(closes)
+    last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
+    return rsi_val, last_time
 
 @app.route("/api/rsi")
 def api_rsi():
-    return jsonify(fetch_rsi_data())
+    results = {}
+    with Client(TOKEN) as client:
+        for name, figi in INSTRUMENTS.items():
+            results[name] = {}
+            for tf_name in TIMEFRAMES:
+                rsi_val, last_time = get_rsi(client, figi, tf_name)
+                results[name][tf_name] = {
+                    "RSI": rsi_val if rsi_val is not None else "-",
+                    "time": last_time if last_time is not None else "-"
+                }
+    return jsonify(results)
 
 @app.route("/")
 def index():
@@ -215,3 +226,4 @@ def index():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
