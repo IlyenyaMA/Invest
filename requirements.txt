@@ -1,0 +1,6 @@
+ipywidgets
+pandas
+tinkoff.invest
+datetime
+IPython.display
+streamlit
