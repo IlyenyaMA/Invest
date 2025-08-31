@@ -1,6 +1,4 @@
-ipywidgets
 pandas
-tinkoff.invest
-datetime
-IPython.display
+numpy
+tinkoff-investments
 streamlit
