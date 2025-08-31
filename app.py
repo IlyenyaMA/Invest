@@ -193,28 +193,49 @@ def fetch_rsi_data():
     for name, figi in INSTRUMENTS.items():
         results[name] = {}
         try:
-            # 5 минут
-            candles_5m = get_candles(figi, CandleInterval.CANDLE_INTERVAL_5_MIN)
-            prices_5m = [candle.close.units + candle.close.nano/1e9 for candle in candles_5m]
-            rsi_5m = compute_rsi(prices_5m)
-            time_5m = candles_5m[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M") if candles_5m else "-"
+            with Client(TOKEN) as client:
+                # 5 минут
+                try:
+                    candles_5m = client.market_data.get_candles(
+                        figi=figi,
+                        from_=datetime.now(timezone.utc) - timedelta(days=7),
+                        to=datetime.now(timezone.utc),
+                        interval=CandleInterval.CANDLE_INTERVAL_5_MIN
+                    ).candles
+                    prices_5m = [c.close.units + c.close.nano/1e9 for c in candles_5m]
+                    rsi_5m = compute_rsi(prices_5m) if prices_5m else "-"
+                    time_5m = candles_5m[-1].time.strftime("%Y-%m-%d %H:%M") if candles_5m else "-"
+                except Exception as e:
+                    print(f"Ошибка 5m для {name}: {e}")
+                    rsi_5m, time_5m = "-", "-"
 
-            # 1 час
-            candles_1h = get_candles(figi, CandleInterval.CANDLE_INTERVAL_HOUR)
-            prices_1h = [candle.close.units + candle.close.nano/1e9 for candle in candles_1h]
-            rsi_1h = compute_rsi(prices_1h)
-            time_1h = candles_1h[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M") if candles_1h else "-"
+                # 1 час
+                try:
+                    candles_1h = client.market_data.get_candles(
+                        figi=figi,
+                        from_=datetime.now(timezone.utc) - timedelta(days=60),
+                        to=datetime.now(timezone.utc),
+                        interval=CandleInterval.CANDLE_INTERVAL_HOUR
+                    ).candles
+                    prices_1h = [c.close.units + c.close.nano/1e9 for c in candles_1h]
+                    rsi_1h = compute_rsi(prices_1h) if prices_1h else "-"
+                    time_1h = candles_1h[-1].time.strftime("%Y-%m-%d %H:%M") if candles_1h else "-"
+                except Exception as e:
+                    print(f"Ошибка 1h для {name}: {e}")
+                    rsi_1h, time_1h = "-", "-"
 
-            results[name] = {
-                "5m": {"RSI": rsi_5m if rsi_5m else "-", "time": time_5m},
-                "1h": {"RSI": rsi_1h if rsi_1h else "-", "time": time_1h},
-            }
+                results[name] = {
+                    "5m": {"RSI": rsi_5m, "time": time_5m},
+                    "1h": {"RSI": rsi_1h, "time": time_1h}
+                }
+
         except Exception as e:
+            print(f"Ошибка клиента для {name}: {e}")
             results[name] = {
                 "5m": {"RSI": "-", "time": "-"},
-                "1h": {"RSI": "-", "time": "-"},
-                "error": str(e)
+                "1h": {"RSI": "-", "time": "-"}
             }
+
     return results
 
 @app.route("/api/rsi")
@@ -228,3 +249,4 @@ def index():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
