@@ -11,18 +11,20 @@
     th { background-color: #4CAF50; color: white; cursor: pointer; }
     tr:nth-child(even) { background-color: #f9f9f9; }
     tr:hover { background-color: #f1f1f1; }
-    button { padding: 8px 12px; margin-left: 10px; cursor: pointer; }
+    button { padding: 5px 10px; margin-top: 10px; cursor: pointer; }
 </style>
 </head>
 <body>
 <h1>RSI Таблица</h1>
-<button id="refreshBtn">Обновить данные</button>
+
+<button id="refreshBtn">Обновить таблицу</button>
+
 <table id="rsiTable">
     <thead>
         <tr>
             <th>Инструмент</th>
-            <th data-tf="5m">5 минут ▲▼</th>
-            <th data-tf="1h">1 час ▲▼</th>
+            <th id="sort5m">5 минут ▼</th>
+            <th id="sort1h">1 час ▼</th>
             <th>Время последней свечи</th>
         </tr>
     </thead>
@@ -30,59 +32,68 @@
 </table>
 
 <script>
-let lastData = {};
-let sortOrder = { "5m": "desc", "1h": "desc" };
+let rsiData = {};
+let sortDirection = { "5m": false, "1h": false }; // false - по убыванию, true - по возрастанию
 
 async function loadRSI() {
     try {
         const response = await fetch('/api/rsi');
         if (!response.ok) throw new Error('Ошибка загрузки данных');
-        lastData = await response.json();
-        populateTable(lastData);
+        rsiData = await response.json();
+        populateTable();
     } catch (err) {
         console.error("Ошибка загрузки данных:", err);
     }
 }
 
-function populateTable(data, sortTF=null, order="desc") {
+function populateTable(sortBy) {
     const tbody = document.querySelector("#rsiTable tbody");
     tbody.innerHTML = "";
 
-    let names = Object.keys(data);
-    if(sortTF) {
-        names.sort((a,b) => {
-            const valA = data[a][sortTF]?.RSI !== "-" ? data[a][sortTF].RSI : -Infinity;
-            const valB = data[b][sortTF]?.RSI !== "-" ? data[b][sortTF].RSI : -Infinity;
-            return order === "desc" ? valB - valA : valA - valB;
+    let names = Object.keys(rsiData);
+    if (sortBy) {
+        names.sort((a, b) => {
+            const valA = rsiData[a][sortBy]?.RSI !== "-" ? rsiData[a][sortBy].RSI : -Infinity;
+            const valB = rsiData[b][sortBy]?.RSI !== "-" ? rsiData[b][sortBy].RSI : -Infinity;
+            return sortDirection[sortBy] ? valA - valB : valB - valA;
         });
     }
 
     names.forEach(name => {
-        const r5 = data[name]["5m"]?.RSI ?? "-";
-        const r1 = data[name]["1h"]?.RSI ?? "-";
-        const t5 = data[name]["5m"]?.time ?? "-";
-        const t1 = data[name]["1h"]?.time ?? "-";
-        const lastTime = t5 !== "-" ? t5 : t1;
+        const rsi5 = rsiData[name]["5m"]?.RSI ?? "-";
+        const rsi1h = rsiData[name]["1h"]?.RSI ?? "-";
+        const time5 = rsiData[name]["5m"]?.time ?? "-";
+        const time1h = rsiData[name]["1h"]?.time ?? "-";
+        const lastTime = time5 !== "-" ? time5 : time1h;
 
         const row = document.createElement("tr");
-        row.innerHTML = `<td>${name}</td><td>${r5}</td><td>${r1}</td><td>${lastTime}</td>`;
+        row.innerHTML = `
+            <td>${name}</td>
+            <td>${rsi5}</td>
+            <td>${rsi1h}</td>
+            <td>${lastTime}</td>
+        `;
         tbody.appendChild(row);
     });
 }
 
-// сортировка при клике на заголовок TF
-document.querySelectorAll("th[data-tf]").forEach(th => {
-    th.addEventListener("click", () => {
-        const tf = th.dataset.tf;
-        sortOrder[tf] = sortOrder[tf] === "desc" ? "asc" : "desc";
-        populateTable(lastData, tf, sortOrder[tf]);
-    });
+// Сортировка при клике на заголовки TF
+document.getElementById("sort5m").addEventListener("click", () => {
+    sortDirection["5m"] = !sortDirection["5m"];
+    populateTable("5m");
+    document.getElementById("sort5m").textContent = `5 минут ${sortDirection["5m"] ? "▲" : "▼"}`;
 });
 
-// обновление по кнопке
+document.getElementById("sort1h").addEventListener("click", () => {
+    sortDirection["1h"] = !sortDirection["1h"];
+    populateTable("1h");
+    document.getElementById("sort1h").textContent = `1 час ${sortDirection["1h"] ? "▲" : "▼"}`;
+});
+
+// Обновление по кнопке
 document.getElementById("refreshBtn").addEventListener("click", loadRSI);
 
-// автообновление каждые 5 минут
+// Автообновление каждые 5 минут
 loadRSI();
 setInterval(loadRSI, 5 * 60 * 1000);
 </script>
