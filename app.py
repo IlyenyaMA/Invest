@@ -137,7 +137,6 @@ INSTRUMENTS = {
     "Совкомфлот": "BBG000R04X57",
     "Европлан": "TCS00A0ZZFS9",
     "СПБ биржа": "TCS60A0JQ9P9",
-    "Эталон групп": "TCS50A10C1L6",
     "Белон": "TCS20A0J2QG8",
     "Новабев": "BBG000TY1CD1",
     "HENDERSON": "TCS00A106XF2",
@@ -262,6 +261,7 @@ def index():
 if __name__ == "__main__":
     threading.Thread(target=refresh_cache, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
+
 
 
 
