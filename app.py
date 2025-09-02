@@ -13,7 +13,7 @@ INSTRUMENTS = {
     "Сбербанк": "SBER",
     "Газпром": "GAZP",
     "Лукойл": "LKOH",
-    "Яндекс": "YNDX",
+    "Яндекс": "TCS00A107T19",
     "ВТБ": "VTBR",
 }
 
@@ -133,3 +133,4 @@ def index():
 if __name__ == "__main__":
     # Запуск: python app.py
     app.run(host="0.0.0.0", port=5000)
+
