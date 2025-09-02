@@ -8,7 +8,7 @@ import time
 app = Flask(__name__, static_folder="static")
 CACHE = {}
 
-# Используем реально торгующиеся тикеры MOEX
+# Тикеры MOEX для примера
 INSTRUMENTS = {
     "Сбербанк": "SBER",
     "Газпром": "GAZP",
@@ -54,8 +54,11 @@ def fetch_moex_candles(ticker: str, interval_minutes: int, days: int):
         if not rows:
             return None
         df = pd.DataFrame(rows, columns=cols)
+        if 'CLOSE' not in df.columns or 'BEGIN' not in df.columns:
+            return None
         df['CLOSE'] = pd.to_numeric(df['CLOSE'], errors='coerce')
         df['BEGIN'] = pd.to_datetime(df['BEGIN'])
+        df = df.dropna(subset=['CLOSE', 'BEGIN'])
         return df
     except Exception as e:
         print(f"[MOEX] Ошибка для {ticker}: {e}")
@@ -67,13 +70,10 @@ def build_rsi_row(ticker: str):
     for tf_name, interval in TIMEFRAMES.items():
         days = LOOKBACK_DAYS[tf_name]
         df = fetch_moex_candles(ticker, interval, days)
-        if df is None or df.empty:
+        if df is None or df.empty or len(df) < 15:
             out[tf_name] = {"RSI": "-", "time": "-"}
             continue
         closes = df['CLOSE']
-        if len(closes) < 15:
-            out[tf_name] = {"RSI": "-", "time": "-"}
-            continue
         rsi_val = compute_rsi(closes)
         last_time = (df['BEGIN'].iloc[-1] + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
         out[tf_name] = {"RSI": rsi_val, "time": last_time}
