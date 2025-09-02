@@ -5,22 +5,21 @@ import pandas as pd
 import threading
 import time
 
-# 🔑 Ваш токен Tinkoff Invest API
+# 🔑 Ваш токен Tinkoff API
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
-# FIGI инструментов (пример)
+# Используем только реально торгующиеся FIGI
 INSTRUMENTS = {
-    "Башнефть": "BBG004S68758",
-    "Трубная Металлургическая Компания": "BBG004TC84Z8",
-    "Московская Биржа": "BBG004730JJ5",
-    "Башнефть — привилегированные акции": "BBG004S686N0",
-    "РУСАЛ": "BBG008F2T3T2"
+    "Сбербанк": "BBG004730N88",
+    "Газпром": "BBG004730RP0",
+    "Лукойл": "BBG004731354",
+    "Яндекс": "BBG006L8G4H1",
 }
 
 app = Flask(__name__, static_folder="static")
 CACHE = {}  # кэш для актуальных данных
 
-# ===== Функция расчёта RSI =====
+# ===== Расчёт RSI =====
 def compute_rsi(prices: pd.Series, period: int = 14) -> float:
     delta = prices.diff()
     up = delta.clip(lower=0)
@@ -33,28 +32,26 @@ def compute_rsi(prices: pd.Series, period: int = 14) -> float:
 
 # ===== Получение свечей и расчёт RSI =====
 def fetch_rsi(client, figi: str, interval: CandleInterval) -> dict:
-    now = datetime.now(timezone.utc)
-    start = now - timedelta(days=5)  # берем последние 5 дней
+    now = datetime.utcnow()
+    days = 10 if interval == CandleInterval.CANDLE_INTERVAL_5_MIN else 60
+    from_ = now - timedelta(days=days)
     try:
-        response = client.market_data.get_candles(
+        resp = client.market_data.get_candles(
             figi=figi,
-            from_=start,
+            from_=from_,
             to=now,
             interval=interval
         )
-        candles = response.candles  # здесь список объектов свечей
-
+        candles = resp.candles
         if not candles:
-            print(f"[WARN] Пустые свечи для FIGI {figi}, interval {interval}")
+            print(f"[WARN] Нет свечей для FIGI {figi}, interval {interval}")
             return {"RSI": "-", "time": "-"}
-
-        prices = pd.Series([float(c.c) for c in candles])
+        prices = pd.Series([c.c for c in candles])
+        if len(prices) < 15:
+            return {"RSI": "-", "time": "-"}
         rsi_val = compute_rsi(prices)
-
         last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
-
         return {"RSI": rsi_val, "time": last_time}
-
     except Exception as e:
         print(f"[ERROR] fetch_rsi {figi}: {e}")
         return {"RSI": "-", "time": "-"}
@@ -84,9 +81,7 @@ def api_rsi():
     return jsonify(CACHE)
 
 if __name__ == "__main__":
-    # фоновый поток для обновления кэша
+    # фоновый поток
     t = threading.Thread(target=refresh_cache, daemon=True)
     t.start()
     app.run(host="0.0.0.0", port=5000)
-
-
