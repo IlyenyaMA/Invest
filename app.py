@@ -1,11 +1,6 @@
-from flask import Flask, jsonify, send_from_directory
+import pandas as pd
 from tinkoff.invest import Client, CandleInterval
 from datetime import datetime, timedelta, timezone
-import pandas as pd
-
-app = Flask(__name__, static_folder="static")
-
-TOKEN = "твой токен"
 
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
@@ -162,57 +157,109 @@ INSTRUMENTS = {
     "Озон фарма": "TCS00A109B25"
 }
 
+# Таймфреймы (от 5m до 1w)
 TIMEFRAMES = {
     "5m": CandleInterval.CANDLE_INTERVAL_5_MIN,
-    "1h": CandleInterval.CANDLE_INTERVAL_HOUR
+    "15m": CandleInterval.CANDLE_INTERVAL_15_MIN,
+    "1h": CandleInterval.CANDLE_INTERVAL_HOUR,
+    "4h": CandleInterval.CANDLE_INTERVAL_4_HOUR,
+    "1d": CandleInterval.CANDLE_INTERVAL_DAY,
+    "1w": CandleInterval.CANDLE_INTERVAL_WEEK
 }
 
-def compute_rsi(prices, period=14):
-    df = pd.DataFrame(prices, columns=["close"])
-    delta = df["close"].diff()
+# Ограничения API по количеству дней
+def get_days_for_interval(tf_name):
+    if tf_name == "5m":
+        return 7        # максимум неделя
+    elif tf_name == "15m":
+        return 14       # 2 недели
+    elif tf_name == "1h":
+        return 60       # ~2 месяца
+    elif tf_name == "4h":
+        return 120      # ~4 месяца
+    elif tf_name == "1d":
+        return 365      # год
+    elif tf_name == "1w":
+        return 5*365    # 5 лет
+    return 30
+
+# RSI14
+def rsi(series, period=14):
+    delta = series.diff()
     up = delta.clip(lower=0)
     down = -delta.clip(upper=0)
     roll_up = up.ewm(alpha=1/period, adjust=False).mean()
     roll_down = down.ewm(alpha=1/period, adjust=False).mean()
     rs = roll_up / roll_down
-    rsi = 100 - (100 / (1 + rs))
-    return round(rsi.iloc[-1], 2) if not rsi.empty else None
+    return 100 - (100 / (1 + rs))
 
-def fetch_rsi():
-    results = {}
-    with Client(TOKEN) as client:
+# Получение RSI
+def get_rsi(client, figi, tf_name, interval):
+    days = get_days_for_interval(tf_name)
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+
+    candles = client.market_data.get_candles(
+        figi=figi,
+        from_=start,
+        to=now,
+        interval=interval
+    ).candles
+
+    if not candles or len(candles) < 15:
+        return None, None
+
+    closes = [c.close.units + c.close.nano / 1e9 for c in candles]
+    rsi_val = round(rsi(pd.Series(closes)).iloc[-1], 2)
+    last_time = candles[-1].time.astimezone(
+        timezone(timedelta(hours=3))
+    ).strftime("%Y-%m-%d %H:%M:%S")
+
+    return rsi_val, last_time
+
+# Подсветка сигналов
+def highlight_rsi(val):
+    try:
+        rsi_val = float(val.split(" ")[0])
+        if rsi_val < 30 or rsi_val > 70:
+            return "background-color: lightgreen"
+    except:
+        pass
+    return ""
+
+# Сбор данных
+results = {}
+with Client(TOKEN) as client:
+    for name in INSTRUMENTS:
+        results[name] = {}
+    for tf_name, interval in TIMEFRAMES.items():
         for name, figi in INSTRUMENTS.items():
-            results[name] = {}
-            for tf_name, interval in TIMEFRAMES.items():
-                try:
-                    now = datetime.now(timezone.utc)
-                    start = now - timedelta(days=30)
-                    candles = client.market_data.get_candles(
-                        figi=figi,
-                        from_=start,
-                        to=now,
-                        interval=interval
-                    ).candles
-                    if not candles:
-                        results[name][tf_name] = {"RSI": "-", "time": "-"}
-                        continue
+            try:
+                val, last_time = get_rsi(client, figi, tf_name, interval)
+                if val is not None:
+                    results[name][tf_name] = f"{val} ({last_time})"
+                else:
+                    results[name][tf_name] = "-"
+            except Exception as e:
+                print(f"Ошибка для {name} ({tf_name}): {e}")
+                results[name][tf_name] = "-"
 
-                    closes = [c.close.units + c.close.nano/1e9 for c in candles]
-                    rsi_val = compute_rsi(closes)
-                    last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
-                    results[name][tf_name] = {"RSI": rsi_val, "time": last_time}
-                except:
-                    results[name][tf_name] = {"RSI": "-", "time": "-"}
-    return results
+# Таблица
+df = pd.DataFrame(results).T
 
-@app.route("/api/rsi")
-def api_rsi():
-    return jsonify(fetch_rsi())
+# --- Сортировка по выбранному ТФ ---
+SORT_BY_TF = "1h"   # ← здесь выбирай ТФ
+def extract_rsi(cell):
+    try:
+        return float(cell.split(" ")[0])
+    except:
+        return None
 
-@app.route("/")
-def index():
-    return send_from_directory(app.static_folder, "index.html")
+df_sorted = df.copy()
+df_sorted["sort_key"] = df_sorted[SORT_BY_TF].apply(extract_rsi)
+df_sorted = df_sorted.sort_values(by="sort_key", ascending=True).drop(columns=["sort_key"])
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-
+# Вывод
+from IPython.display import display
+print("RSI14 таблица (RSI14 + время последней свечи, МСК):")
+display(df_sorted.style.applymap(highlight_rsi))
