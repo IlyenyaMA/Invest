@@ -10,21 +10,11 @@
     .bar .left { display:flex; gap:12px; align-items:center; }
     button { padding: 8px 12px; border:0; border-radius:8px; background:#4CAF50; color:#fff; cursor:pointer; }
     button:hover { filter: brightness(0.95); }
-
-    /* контейнер с прокруткой */
-    .table-container {
-      max-height: 600px;       /* можно менять под экран */
-      overflow-y: auto;        /* вертикальная прокрутка */
-      overflow-x: auto;        /* горизонтальная прокрутка при широкой таблице */
-      margin-top: 16px;
-      background: #fff;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-      border-radius: 8px;
-      padding: 4px;
-    }
-
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 10px; border: 1px solid #ddd; text-align: center; white-space: nowrap; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; background: #fff; box-shadow: 0 0 10px rgba(0,0,0,0.1); display:block; max-height: 700px; overflow-y: auto; }
+    thead { display: table; width: 100%; table-layout: fixed; }
+    tbody { display: block; width: 100%; }
+    th, td { padding: 10px; border: 1px solid #ddd; text-align: center; }
+    tr { display: table; width: 100%; table-layout: fixed; }
     th { background-color: #4CAF50; color: white; cursor: pointer; user-select: none; }
     tr:nth-child(even) { background-color: #f9f9f9; }
     tr:hover { background-color: #f1f1f1; }
@@ -35,115 +25,115 @@
 </head>
 <body>
 
-  <h1>RSI Таблица</h1>
-  <div class="bar">
-    <div class="left">
-      <button id="refreshBtn">Обновить данные</button>
-      <span id="status"></span>
-    </div>
-    <small>Нажми на заголовок «5 минут» или «1 час» для сортировки</small>
+<h1>RSI Таблица</h1>
+<div class="bar">
+  <div class="left">
+    <button id="refreshBtn">Обновить данные</button>
+    <span id="status"></span>
   </div>
+  <small>Нажми на заголовок «5 минут» или «1 час» для сортировки</small>
+</div>
 
-  <div class="table-container">
-    <table id="rsiTable">
-      <thead>
-        <tr>
-          <th>Инструмент</th>
-          <th id="th-5m" class="th-sort" data-tf="5m">5 минут</th>
-          <th id="th-1h" class="th-sort" data-tf="1h">1 час</th>
-          <th>Время последней свечи</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
+<table id="rsiTable">
+  <thead>
+    <tr>
+      <th>Инструмент</th>
+      <th id="th-5m" class="th-sort" data-tf="5m">5 минут</th>
+      <th id="th-1h" class="th-sort" data-tf="1h">1 час</th>
+      <th>Время последней свечи</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
 
-  <script>
-    let lastData = {};
-    let sortState = { tf: null, dir: 'desc' }; // dir: 'asc' | 'desc'
+<script>
+let lastData = {};
+let sortState = { tf: null, dir: 'desc' }; // dir: 'asc' | 'desc'
 
-    async function fetchRSI() {
-      const status = document.getElementById('status');
-      try {
-        status.textContent = 'Загрузка...';
-        const res = await fetch('/api/rsi', { cache: 'no-store' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        lastData = await res.json();
-        status.textContent = 'Обновлено: ' + new Date().toLocaleTimeString();
-        renderTable();
-      } catch (e) {
-        console.error('Ошибка загрузки данных:', e);
-        status.textContent = 'Ошибка загрузки';
-      }
-    }
+async function fetchRSI() {
+  const status = document.getElementById('status');
+  try {
+    status.textContent = 'Загрузка...';
+    const res = await fetch('/api/rsi', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    lastData = await res.json();
+    status.textContent = 'Обновлено: ' + new Date().toLocaleTimeString();
+    renderTable();
+  } catch (e) {
+    console.error('Ошибка загрузки данных:', e);
+    status.textContent = 'Ошибка загрузки';
+  }
+}
 
-    function renderTable() {
-      const tbody = document.querySelector('#rsiTable tbody');
-      tbody.innerHTML = '';
+function renderTable() {
+  const tbody = document.querySelector('#rsiTable tbody');
+  tbody.innerHTML = '';
 
-      let names = Object.keys(lastData);
+  let names = Object.keys(lastData);
 
-      // сортировка
-      if (sortState.tf) {
-        const tf = sortState.tf;
-        const dir = sortState.dir === 'asc' ? 1 : -1;
-        names.sort((a, b) => {
-          const va = lastData[a][tf]?.RSI;
-          const vb = lastData[b][tf]?.RSI;
-          const na = (va === '-' || va === null || va === undefined) ? -Infinity : Number(va);
-          const nb = (vb === '-' || vb === null || vb === undefined) ? -Infinity : Number(vb);
-          if (na === nb) return a.localeCompare(b);
-          return (na - nb) * dir;
-        });
-      }
+  // сортировка
+  if (sortState.tf) {
+    const tf = sortState.tf;
+    const dir = sortState.dir === 'asc' ? 1 : -1;
+    names.sort((a, b) => {
+      const va = lastData[a][tf]?.RSI;
+      const vb = lastData[b][tf]?.RSI;
+      const na = (va === '-' || va === null || va === undefined) ? -Infinity : Number(va);
+      const nb = (vb === '-' || vb === null || vb === undefined) ? -Infinity : Number(vb);
+      if (na === nb) return a.localeCompare(b);
+      return (na - nb) * dir;
+    });
+  }
 
-      for (const name of names) {
-        const r5 = lastData[name]['5m']?.RSI ?? '-';
-        const r1 = lastData[name]['1h']?.RSI ?? '-';
-        const t5 = lastData[name]['5m']?.time ?? '-';
-        const t1 = lastData[name]['1h']?.time ?? '-';
-        const lastTime = t5 !== '-' ? t5 : t1;
+  // создаём весь HTML одной строкой
+  let html = '';
+  for (const name of names) {
+    const r5 = lastData[name]['5m']?.RSI ?? '-';
+    const r1 = lastData[name]['1h']?.RSI ?? '-';
+    const t5 = lastData[name]['5m']?.time ?? '-';
+    const t1 = lastData[name]['1h']?.time ?? '-';
+    const lastTime = t5 !== '-' ? t5 : t1;
 
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${name}</td>
-          <td>${r5}</td>
-          <td>${r1}</td>
-          <td>${lastTime}</td>
-        `;
-        tbody.appendChild(tr);
-      }
+    html += `
+      <tr>
+        <td>${name}</td>
+        <td>${r5}</td>
+        <td>${r1}</td>
+        <td>${lastTime}</td>
+      </tr>`;
+  }
+  tbody.innerHTML = html;
 
-      // визуальные индикаторы сортировки
-      document.querySelectorAll('.th-sort').forEach(th => th.classList.remove('asc', 'desc'));
-      if (sortState.tf) {
-        const th = document.querySelector(`.th-sort[data-tf="${sortState.tf}"]`);
-        if (th) th.classList.add(sortState.dir);
-      }
-    }
+  // визуальные индикаторы сортировки
+  document.querySelectorAll('.th-sort').forEach(th => th.classList.remove('asc', 'desc'));
+  if (sortState.tf) {
+    const th = document.querySelector(`.th-sort[data-tf="${sortState.tf}"]`);
+    if (th) th.classList.add(sortState.dir);
+  }
+}
 
-    // обработчики кликов по заголовкам
-    document.getElementById('th-5m').addEventListener('click', () => toggleSort('5m'));
-    document.getElementById('th-1h').addEventListener('click', () => toggleSort('1h'));
+// обработчики кликов по заголовкам для сортировки
+document.getElementById('th-5m').addEventListener('click', () => toggleSort('5m'));
+document.getElementById('th-1h').addEventListener('click', () => toggleSort('1h'));
 
-    function toggleSort(tf) {
-      if (sortState.tf === tf) {
-        sortState.dir = (sortState.dir === 'asc') ? 'desc' : 'asc';
-      } else {
-        sortState.tf = tf;
-        sortState.dir = 'desc';
-      }
-      renderTable();
-    }
+function toggleSort(tf) {
+  if (sortState.tf === tf) {
+    sortState.dir = (sortState.dir === 'asc') ? 'desc' : 'asc';
+  } else {
+    sortState.tf = tf;
+    sortState.dir = 'desc';
+  }
+  renderTable();
+}
 
-    // кнопка "Обновить"
-    document.getElementById('refreshBtn').addEventListener('click', fetchRSI);
+// кнопка "Обновить"
+document.getElementById('refreshBtn').addEventListener('click', fetchRSI);
 
-    // автообновление каждые 5 минут
-    setInterval(fetchRSI, 5 * 60 * 1000);
+// автообновление каждые 5 минут
+setInterval(fetchRSI, 5 * 60 * 1000);
 
-    // первый запуск
-    fetchRSI();
-  </script>
+// первый запуск
+fetchRSI();
+</script>
 </body>
 </html>
