@@ -1,141 +1,147 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>RSI Таблица</title>
   <style>
     body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 20px; }
     h1 { text-align: center; }
-    .bar { display:flex; gap:12px; align-items:center; justify-content:space-between; max-width:1100px; margin:0 auto; }
-    .bar .left { display:flex; gap:12px; align-items:center; }
-    button { padding: 8px 12px; border:0; border-radius:8px; background:#4CAF50; color:#fff; cursor:pointer; }
-    button:hover { filter: brightness(0.95); }
-    table { width: 100%; border-collapse: collapse; margin-top: 16px; background: #fff; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-    th, td { padding: 10px; border: 1px solid #ddd; text-align: center; }
-    th { background-color: #4CAF50; color: white; cursor: pointer; user-select: none; }
-    tr:nth-child(even) { background-color: #f9f9f9; }
-    tr:hover { background-color: #f1f1f1; }
-    .th-sort::after { content: " ⇅"; font-size: 12px; opacity: .85; }
-    .th-sort.asc::after { content: " ↑"; }
-    .th-sort.desc::after { content: " ↓"; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #fff; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    th { background: #eee; cursor: pointer; }
+    tr:hover { background: #fafafa; }
+    .highlight { background-color: lightgreen; }
   </style>
 </head>
 <body>
-
-  <h1>RSI Таблица</h1>
-  <div class="bar">
-    <div class="left">
-      <button id="refreshBtn">Обновить данные</button>
-      <span id="status"></span>
-    </div>
-    <small>Нажми на заголовок «5 минут» или «1 час» для сортировки</small>
-  </div>
-
+  <h1>RSI14 Таблица</h1>
   <table id="rsiTable">
     <thead>
       <tr>
         <th>Инструмент</th>
-        <th id="th-5m" class="th-sort" data-tf="5m">5 минут</th>
-        <th id="th-1h" class="th-sort" data-tf="1h">1 час</th>
-        <th>Время последней свечи</th>
+        <th data-tf="5m">5m</th>
+        <th data-tf="15m">15m</th>
+        <th data-tf="1h">1h</th>
+        <th data-tf="4h">4h</th>
+        <th data-tf="1d">1d</th>
+        <th data-tf="1w">1w</th>
       </tr>
     </thead>
     <tbody></tbody>
   </table>
 
   <script>
-    let lastData = {};
-    let sortState = { tf: null, dir: 'asc' }; // dir: 'asc' | 'desc'
+    // --- Конфигурация ---
+    const TOKEN = TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"; // Токен Тинькофф
+    const INSTRUMENTS = {
+      "Сбербанк": "BBG004730N88",
+      "Газпром": "BBG004730RP0",
+      "Лукойл": "BBG004730ZJ9",
+      "Яндекс": "BBG006L8G4H1",
+      "Фонд крупнейшие компании РФ": "TCS00A102F40",
+      "Фонд золото": "TCS00A100FQ8"
+    };
+    const TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d", "1w"];
+    const INTERVALS = {
+      "5m": "CANDLE_INTERVAL_5_MIN",
+      "15m": "CANDLE_INTERVAL_15_MIN",
+      "1h": "CANDLE_INTERVAL_HOUR",
+      "4h": "CANDLE_INTERVAL_4_HOUR",
+      "1d": "CANDLE_INTERVAL_DAY",
+      "1w": "CANDLE_INTERVAL_WEEK"
+    };
 
-    async function fetchRSI() {
-      const status = document.getElementById('status');
-      try {
-        status.textContent = 'Загрузка...';
-        const res = await fetch('/api/rsi', { cache: 'no-store' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        lastData = await res.json();
-        status.textContent = 'Обновлено: ' + new Date().toLocaleTimeString();
-        renderTable();
-      } catch (e) {
-        console.error('Ошибка загрузки данных:', e);
-        status.textContent = 'Ошибка загрузки';
+    // --- RSI ---
+    function rsi(values, period = 14) {
+      if (values.length < period) return null;
+      let gains = [], losses = [];
+      for (let i = 1; i < values.length; i++) {
+        const diff = values[i] - values[i-1];
+        if (diff >= 0) gains.push(diff); else losses.push(-diff);
+      }
+      let avgGain = gains.reduce((a,b)=>a+b,0) / period;
+      let avgLoss = losses.reduce((a,b)=>a+b,0) / period;
+      if (avgLoss === 0) return 100;
+      const rs = avgGain / avgLoss;
+      return +(100 - 100 / (1 + rs)).toFixed(2);
+    }
+
+    // --- Получение свечей ---
+    async function fetchCandles(figi, interval, days = 30) {
+      const now = new Date().toISOString();
+      const from = new Date(Date.now() - days*24*60*60*1000).toISOString();
+      const url = "https://invest-public-api.tinkoff.ru/rest/tinkoff.public.invest.api.contract.v1.MarketDataService/GetCandles";
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          figi,
+          from,
+          to: now,
+          interval
+        })
+      });
+
+      const data = await res.json();
+      return data.candles || [];
+    }
+
+    // --- Построение таблицы ---
+    async function buildTable() {
+      const tbody = document.querySelector("#rsiTable tbody");
+      tbody.innerHTML = "";
+
+      for (const [name, figi] of Object.entries(INSTRUMENTS)) {
+        const row = document.createElement("tr");
+        const cellName = document.createElement("td");
+        cellName.textContent = name;
+        row.appendChild(cellName);
+
+        for (const tf of TIMEFRAMES) {
+          const cell = document.createElement("td");
+          const candles = await fetchCandles(figi, INTERVALS[tf], 60);
+          if (candles.length > 15) {
+            const closes = candles.map(c => c.close?.units + c.close?.nano/1e9);
+            const rsiVal = rsi(closes);
+            if (rsiVal !== null) {
+              cell.textContent = rsiVal;
+              if (rsiVal < 30 || rsiVal > 70) cell.classList.add("highlight");
+            } else {
+              cell.textContent = "-";
+            }
+          } else {
+            cell.textContent = "-";
+          }
+          row.appendChild(cell);
+        }
+        tbody.appendChild(row);
       }
     }
 
-    function renderTable() {
-      const tbody = document.querySelector('#rsiTable tbody');
-      tbody.innerHTML = '';
+    // --- Сортировка по столбцу ---
+    document.querySelectorAll("th[data-tf]").forEach(th => {
+      th.addEventListener("click", () => {
+        const tfIndex = [...th.parentNode.children].indexOf(th);
+        const tbody = document.querySelector("#rsiTable tbody");
+        const rows = [...tbody.querySelectorAll("tr")];
 
-      let names = Object.keys(lastData);
-
-      // сортировка, если выбрано поле
-      if (sortState.tf) {
-        const tf = sortState.tf;
-        const dir = sortState.dir === 'asc' ? 1 : -1;
-        names.sort((a, b) => {
-          const va = lastData[a][tf]?.RSI;
-          const vb = lastData[b][tf]?.RSI;
-          const na = (va === '-' || va === null || va === undefined) ? Infinity : Number(va);
-          const nb = (vb === '-' || vb === null || vb === undefined) ? Infinity : Number(vb);
-          if (na === nb) return a.localeCompare(b);
-          return (na - nb) * dir;
+        rows.sort((a,b) => {
+          const aVal = parseFloat(a.children[tfIndex].textContent) || Infinity;
+          const bVal = parseFloat(b.children[tfIndex].textContent) || Infinity;
+          return aVal - bVal;
         });
-      }
 
-      for (const name of names) {
-        const r5 = lastData[name]['5m']?.RSI ?? '-';
-        const r1 = lastData[name]['1h']?.RSI ?? '-';
-        const t5 = lastData[name]['5m']?.time ?? '-';
-        const t1 = lastData[name]['1h']?.time ?? '-';
-        const lastTime = t5 !== '-' ? t5 : t1;
+        tbody.innerHTML = "";
+        rows.forEach(r => tbody.appendChild(r));
+      });
+    });
 
-        const tr = document.createElement('tr');
-
-        // Подсветка сигналов: <30 или >70
-        const r5str = (r5 === '-' ? '-' : r5);
-        const r1str = (r1 === '-' ? '-' : r1);
-        let td5 = `<td${(typeof r5 === 'number' && (r5 < 30 || r5 > 70)) ? ' style="background: #d4f7d4;"' : ''}>${r5str}</td>`;
-        let td1 = `<td${(typeof r1 === 'number' && (r1 < 30 || r1 > 70)) ? ' style="background: #d4f7d4;"' : ''}>${r1str}</td>`;
-
-        tr.innerHTML = `
-          <td>${name}</td>
-          ${td5}
-          ${td1}
-          <td>${lastTime}</td>
-        `;
-        tbody.appendChild(tr);
-      }
-
-      // визуальные индикаторы сортировки
-      document.querySelectorAll('.th-sort').forEach(th => th.classList.remove('asc', 'desc'));
-      if (sortState.tf) {
-        const th = document.querySelector(`.th-sort[data-tf="${sortState.tf}"]`);
-        if (th) th.classList.add(sortState.dir);
-      }
-    }
-
-    // обработчики кликов по заголовкам для сортировки
-    document.getElementById('th-5m').addEventListener('click', () => toggleSort('5m'));
-    document.getElementById('th-1h').addEventListener('click', () => toggleSort('1h'));
-
-    function toggleSort(tf) {
-      if (sortState.tf === tf) {
-        sortState.dir = (sortState.dir === 'asc') ? 'desc' : 'asc';
-      } else {
-        sortState.tf = tf;
-        sortState.dir = 'asc';
-      }
-      renderTable();
-    }
-
-    // Кнопка "Обновить"
-    document.getElementById('refreshBtn').addEventListener('click', fetchRSI);
-
-    // Автообновление каждые 5 минут
-    setInterval(fetchRSI, 5 * 60 * 1000);
-
-    // Первый запуск
-    fetchRSI();
+    // --- Запуск ---
+    buildTable();
   </script>
 </body>
 </html>
