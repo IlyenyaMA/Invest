@@ -45,7 +45,7 @@
 
   <script>
     let lastData = {};
-    let sortState = { tf: null, dir: 'desc' }; // dir: 'asc' | 'desc'
+    let sortState = { tf: null, dir: 'asc' }; // dir: 'asc' | 'desc'
 
     async function fetchRSI() {
       const status = document.getElementById('status');
@@ -75,8 +75,8 @@
         names.sort((a, b) => {
           const va = lastData[a][tf]?.RSI;
           const vb = lastData[b][tf]?.RSI;
-          const na = (va === '-' || va === null || va === undefined) ? -Infinity : Number(va);
-          const nb = (vb === '-' || vb === null || vb === undefined) ? -Infinity : Number(vb);
+          const na = (va === '-' || va === null || va === undefined) ? Infinity : Number(va);
+          const nb = (vb === '-' || vb === null || vb === undefined) ? Infinity : Number(vb);
           if (na === nb) return a.localeCompare(b);
           return (na - nb) * dir;
         });
@@ -90,10 +90,17 @@
         const lastTime = t5 !== '-' ? t5 : t1;
 
         const tr = document.createElement('tr');
+
+        // Подсветка сигналов: <30 или >70
+        const r5str = (r5 === '-' ? '-' : r5);
+        const r1str = (r1 === '-' ? '-' : r1);
+        let td5 = `<td${(typeof r5 === 'number' && (r5 < 30 || r5 > 70)) ? ' style="background: #d4f7d4;"' : ''}>${r5str}</td>`;
+        let td1 = `<td${(typeof r1 === 'number' && (r1 < 30 || r1 > 70)) ? ' style="background: #d4f7d4;"' : ''}>${r1str}</td>`;
+
         tr.innerHTML = `
           <td>${name}</td>
-          <td>${r5}</td>
-          <td>${r1}</td>
+          ${td5}
+          ${td1}
           <td>${lastTime}</td>
         `;
         tbody.appendChild(tr);
@@ -108,19 +115,15 @@
     }
 
     // обработчики кликов по заголовкам для сортировки
-    document.getElementById('th-5m').addEventListener('click', () => {
-      toggleSort('5m');
-    });
-    document.getElementById('th-1h').addEventListener('click', () => {
-      toggleSort('1h');
-    });
+    document.getElementById('th-5m').addEventListener('click', () => toggleSort('5m'));
+    document.getElementById('th-1h').addEventListener('click', () => toggleSort('1h'));
 
     function toggleSort(tf) {
       if (sortState.tf === tf) {
         sortState.dir = (sortState.dir === 'asc') ? 'desc' : 'asc';
       } else {
         sortState.tf = tf;
-        sortState.dir = 'desc';
+        sortState.dir = 'asc';
       }
       renderTable();
     }
