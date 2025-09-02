@@ -1,4 +1,4 @@
-# app.py — Flask backend (MOEX ISS, RSI по 5m и 1h с кэшем)
+# app.py — Flask backend (MOEX ISS, RSI по 5m и 1h с актуальной ценой)
 from flask import Flask, jsonify, send_from_directory
 import requests
 import pandas as pd
@@ -8,7 +8,7 @@ import time
 
 app = Flask(__name__, static_folder="static")
 
-# ✅ Чистые MOEX тикеры
+# MOEX тикеры
 INSTRUMENTS = {
     "Сбербанк": "SBER",
     "Газпром": "GAZP",
@@ -16,19 +16,16 @@ INSTRUMENTS = {
     "Яндекс": "YNDX",
 }
 
-# Периоды загрузки
 LOOKBACK_DAYS = {
-    "5m": 7,    # последние 7 дней для минуток
-    "1h": 10,   # последние 10 дней для часов
+    "5m": 7,
+    "1h": 10,
 }
 
-# Кэш для RSI
 RSI_CACHE = {}
 CACHE_LOCK = threading.Lock()
 
 # --- Загрузка свечей ---
 def fetch_moex_candles(ticker: str, interval: str, days: int):
-    """Запрашивает свечи у MOEX ISS"""
     url = f"https://iss.moex.com/iss/engines/stock/markets/shares/securities/{ticker}/candles.json"
     now = datetime.utcnow()
     start = (now - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -48,9 +45,29 @@ def fetch_moex_candles(ticker: str, interval: str, days: int):
         print(f"[ISS] error fetching candles for {ticker} interval={interval}: {e}")
         return None
 
+# --- Получение текущей цены ---
+def fetch_last_price(ticker):
+    url = f"https://iss.moex.com/iss/engines/stock/markets/shares/securities/{ticker}.json"
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        payload = r.json()
+        securities = payload.get("securities", {})
+        cols = securities.get("columns", [])
+        rows = securities.get("data", [])
+        if not rows or not cols:
+            return None
+        if "LAST" in cols:
+            idx = cols.index("LAST")
+            last_price = rows[0][idx]
+            if last_price is not None:
+                return float(last_price)
+    except Exception as e:
+        print(f"[ISS] error fetching last price for {ticker}: {e}")
+    return None
+
 # --- RSI расчет ---
 def compute_rsi_from_list(prices, period=14):
-    """Вычисляет RSI"""
     if len(prices) < period + 1:
         return None
     s = pd.Series(prices, dtype="float64")
@@ -65,10 +82,9 @@ def compute_rsi_from_list(prices, period=14):
 
 # --- Построение строки RSI для инструмента ---
 def build_rsi_row_for_instrument(ticker):
-    """Возвращает RSI по 5m и 1h"""
     out = {}
 
-    # --- 5m (агрегация из 1m)
+    # --- 5m
     df_1m = fetch_moex_candles(ticker, "1", LOOKBACK_DAYS["5m"])
     if df_1m is not None and not df_1m.empty:
         close_col = next((c for c in df_1m.columns if c.lower() == "close"), None)
@@ -82,7 +98,7 @@ def build_rsi_row_for_instrument(ticker):
                 try:
                     last_ts = pd.to_datetime(df_5m[begin_col].iloc[-1])
                     if last_ts.tzinfo is None:
-                        last_ts = last_ts + timedelta(hours=3)
+                        last_ts += timedelta(hours=3)
                     else:
                         last_ts = last_ts.tz_convert(timezone(timedelta(hours=3)))
                     last_time_str = last_ts.strftime("%Y-%m-%d %H:%M:%S")
@@ -101,13 +117,17 @@ def build_rsi_row_for_instrument(ticker):
         begin_col = next((c for c in df_1h.columns if c.lower() == "begin"), None)
         if close_col:
             closes = list(df_1h[close_col].astype(float).values)
+            # Добавляем текущую цену для актуального RSI
+            last_price = fetch_last_price(ticker)
+            if last_price is not None:
+                closes.append(last_price)
             rsi_val = compute_rsi_from_list(closes)
             last_time_str = "-"
             if begin_col:
                 try:
                     last_ts = pd.to_datetime(df_1h[begin_col].iloc[-1])
                     if last_ts.tzinfo is None:
-                        last_ts = last_ts + timedelta(hours=3)
+                        last_ts += timedelta(hours=3)
                     else:
                         last_ts = last_ts.tz_convert(timezone(timedelta(hours=3)))
                     last_time_str = last_ts.strftime("%Y-%m-%d %H:%M:%S")
@@ -121,7 +141,7 @@ def build_rsi_row_for_instrument(ticker):
 
     return out
 
-# --- Фоновое обновление кэша ---
+# --- Фоновый поток для обновления кэша ---
 def refresh_cache():
     global RSI_CACHE
     while True:
@@ -134,8 +154,7 @@ def refresh_cache():
                 new_cache[name] = {"5m": {"RSI": "-", "time": "-"}, "1h": {"RSI": "-", "time": "-"}}
         with CACHE_LOCK:
             RSI_CACHE = new_cache
-        # обновляем каждые 60 секунд
-        time.sleep(60)
+        time.sleep(60)  # обновляем каждую минуту
 
 # --- Flask API ---
 @app.route("/api/rsi")
@@ -148,7 +167,5 @@ def index():
     return send_from_directory(app.static_folder, "index.html")
 
 if __name__ == "__main__":
-    # Старт фонового потока
     threading.Thread(target=refresh_cache, daemon=True).start()
-    # Запуск Flask
     app.run(host="0.0.0.0", port=5000)
