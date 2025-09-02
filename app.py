@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import threading
 import time
-
+app = Flask(__name__, static_folder="static")
 # 🔑 Твой токен Tinkoff Invest API
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
@@ -81,3 +81,4 @@ if __name__ == "__main__":
     t = threading.Thread(target=refresh_cache, daemon=True)
     t.start()
     app.run(host="0.0.0.0", port=5000)
+
