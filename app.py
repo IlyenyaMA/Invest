@@ -3,7 +3,7 @@ from tinkoff.invest import Client, CandleInterval
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 
-TOKEN = "ТВОЙ_ТОКЕН"
+TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
 INSTRUMENTS = {
     "GAZP": "BBG004730N88",
@@ -94,3 +94,4 @@ def get_data():
 
 if __name__ == "__main__":
     app.run(debug=True)
+
