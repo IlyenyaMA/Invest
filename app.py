@@ -1,14 +1,14 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 from tinkoff.invest import Client, CandleInterval
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import threading
 import time
-app = Flask(__name__, static_folder="static")
-# 🔑 Твой токен Tinkoff Invest API
+
+# 🔑 Ваш токен Tinkoff Invest API
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
-# FIGI инструментов (можно заменить на нужные)
+# FIGI инструментов (пример)
 INSTRUMENTS = {
     "Сбербанк": "BBG004730N88",
     "Газпром": "BBG004730RP0",
@@ -16,11 +16,10 @@ INSTRUMENTS = {
     "Яндекс": "BBG006L8G4H1",
 }
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static")
+CACHE = {}  # кэш для актуальных данных
 
-CACHE = {}  # сюда складываем данные
-
-# 🔹 Функция расчёта RSI
+# ===== Функция расчёта RSI =====
 def compute_rsi(prices: pd.Series, period: int = 14) -> float:
     delta = prices.diff()
     up = delta.clip(lower=0)
@@ -31,8 +30,8 @@ def compute_rsi(prices: pd.Series, period: int = 14) -> float:
     rsi = 100 - (100 / (1 + rs))
     return round(rsi.iloc[-1], 2)
 
-# 🔹 Достаём свечи для FIGI
-def fetch_rsi(client, figi: str, interval: CandleInterval, depth: int = 100) -> dict:
+# ===== Получение свечей и расчёт RSI =====
+def fetch_rsi(client, figi: str, interval: CandleInterval) -> dict:
     now = datetime.now(timezone.utc)
     try:
         candles = client.market_data.get_candles(
@@ -47,16 +46,15 @@ def fetch_rsi(client, figi: str, interval: CandleInterval, depth: int = 100) -> 
 
         prices = pd.Series([float(c.c) for c in candles])
         rsi_val = compute_rsi(prices)
+        last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
 
-        return {
-            "RSI": rsi_val,
-            "time": candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
-        }
+        return {"RSI": rsi_val, "time": last_time}
+
     except Exception as e:
         print(f"[ERROR] fetch_rsi {figi}: {e}")
         return {"RSI": "-", "time": "-"}
 
-# 🔹 Фоновое обновление кэша
+# ===== Фоновое обновление кэша =====
 def refresh_cache():
     global CACHE
     with Client(TOKEN) as client:
@@ -69,16 +67,19 @@ def refresh_cache():
                 }
             CACHE = results
             print(f"🔄 Cache updated at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            time.sleep(60)  # обновление каждую минуту
+            time.sleep(60)
 
-# 🔹 API
+# ===== Маршруты =====
+@app.route("/")
+def index():
+    return send_from_directory(app.static_folder, "index.html")
+
 @app.route("/api/rsi")
 def api_rsi():
     return jsonify(CACHE)
 
 if __name__ == "__main__":
-    # запускаем фоновый поток обновления
+    # фоновый поток для обновления кэша
     t = threading.Thread(target=refresh_cache, daemon=True)
     t.start()
     app.run(host="0.0.0.0", port=5000)
-
