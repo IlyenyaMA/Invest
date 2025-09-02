@@ -4,13 +4,11 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__, static_folder="static")
 
 # ------------------- НАСТРОЙКИ -------------------
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
-
 INSTRUMENTS = {
     "Башнефть": "BBG004S68758",
     "Трубная Металлургическая Компания": "BBG004TC84Z8",
@@ -169,14 +167,17 @@ TIMEFRAMES = {
     "1h": CandleInterval.CANDLE_INTERVAL_HOUR,
 }
 
-LOOKBACK_DAYS = {"5m": 7, "1h": 10}
+LOOKBACK_DAYS = {
+    "5m": 7,    # последние 7 дней
+    "1h": 10,   # последние 10 дней
+}
+
 RSI_PERIOD = 14
-REFRESH_SECONDS = 8 * 60  # 8 минут
+REFRESH_SECONDS = 60
 RSI_CACHE = {}
 CACHE_LOCK = threading.Lock()
-MAX_WORKERS = 10  # количество потоков для батчей
 
-# ----------------- HELPERS -----------------
+# ------------------- HELPERS -------------------
 def rsi(series, period=RSI_PERIOD):
     delta = series.diff()
     up = delta.clip(lower=0)
@@ -189,64 +190,65 @@ def rsi(series, period=RSI_PERIOD):
 def get_days_for_interval(tf_name):
     return LOOKBACK_DAYS.get(tf_name, 30)
 
-def get_rsi_for_figi(client, name, figi):
-    row = {}
+def get_rsi(client, figi, tf_name, interval):
+    days = get_days_for_interval(tf_name)
     now = datetime.now(timezone.utc)
-    for tf_name, interval in TIMEFRAMES.items():
-        days = get_days_for_interval(tf_name)
-        start = now - timedelta(days=days)
-        try:
-            candles_resp = client.market_data.get_candles(figi=figi, from_=start, to=now, interval=interval)
-            candles = candles_resp.candles
-        except Exception as e:
-            print(f"[ERROR] FIGI {figi} ({tf_name}): {e}")
-            row[tf_name] = {"RSI": "-", "time": "-"}
-            continue
+    start = now - timedelta(days=days)
 
-        if not candles or len(candles) < RSI_PERIOD:
-            row[tf_name] = {"RSI": "-", "time": "-"}
-            continue
+    try:
+        candles_resp = client.market_data.get_candles(
+            figi=figi,
+            from_=start,
+            to=now,
+            interval=interval
+        )
+        candles = candles_resp.candles
+    except Exception as e:
+        print(f"[ERROR] FIGI {figi} ({tf_name}): {e}")
+        return None, None
 
-        closes = [c.close.units + c.close.nano / 1e9 for c in candles]
+    if not candles or len(candles) < RSI_PERIOD:
+        return None, None
 
-        # подставляем актуальную цену последней свечи
-        try:
-            last_price_resp = client.market_data.get_last_prices(figi=[figi])
-            if last_price_resp.last_prices:
-                current_price = (
-                    last_price_resp.last_prices[0].price.units
-                    + last_price_resp.last_prices[0].price.nano / 1e9
-                )
-                closes[-1] = current_price
-        except Exception as e:
-            print(f"[WARN] Не удалось получить last_price для {figi}: {e}")
+    closes = [c.close.units + c.close.nano / 1e9 for c in candles]
 
-        rsi_val = round(rsi(pd.Series(closes)).iloc[-1], 2)
-        last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
-        row[tf_name] = {"RSI": rsi_val, "time": last_time}
+    # заменяем последнюю цену на актуальную
+    try:
+        last_price_resp = client.market_data.get_last_prices(figi=[figi])
+        if last_price_resp.last_prices:
+            current_price = (
+                last_price_resp.last_prices[0].price.units
+                + last_price_resp.last_prices[0].price.nano / 1e9
+            )
+            closes[-1] = current_price
+    except Exception as e:
+        print(f"[WARN] Не удалось получить last_price для {figi}: {e}")
 
-    return name, row
+    rsi_val = round(rsi(pd.Series(closes)).iloc[-1], 2)
+    last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
+    return rsi_val, last_time
 
-# ----------------- Фоновое обновление кэша -----------------
+# ------------------- Фоновое обновление кэша -------------------
 def refresh_cache():
     global RSI_CACHE
     while True:
         new_cache = {}
         with Client(TOKEN) as client:
-            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                futures = [executor.submit(get_rsi_for_figi, client, name, figi) for name, figi in INSTRUMENTS.items()]
-                for future in as_completed(futures):
-                    try:
-                        name, row = future.result()
-                        new_cache[name] = row
-                    except Exception as e:
-                        print(f"[ERROR] Ошибка при обработке: {e}")
+            for name, figi in INSTRUMENTS.items():
+                row = {}
+                for tf_name, interval in TIMEFRAMES.items():
+                    val, last_time = get_rsi(client, figi, tf_name, interval)
+                    if val is not None:
+                        row[tf_name] = {"RSI": val, "time": last_time}
+                    else:
+                        row[tf_name] = {"RSI": "-", "time": "-"}
+                new_cache[name] = row
         with CACHE_LOCK:
             RSI_CACHE = new_cache
         print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] Cache updated")
         time.sleep(REFRESH_SECONDS)
 
-# ----------------- ROUTES -----------------
+# ------------------- Маршруты -------------------
 @app.route("/api/rsi")
 def api_rsi():
     with CACHE_LOCK:
@@ -256,8 +258,7 @@ def api_rsi():
 def index():
     return send_from_directory(app.static_folder, "index.html")
 
-# ----------------- MAIN -----------------
+# ------------------- MAIN -------------------
 if __name__ == "__main__":
     threading.Thread(target=refresh_cache, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
-
