@@ -5,11 +5,9 @@ import pandas as pd
 import threading
 import time
 
-# 🔑 Вставь сюда свой токен Tinkoff API
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
-
-# Популярные FIGI для теста
+# Популярные активно торгующиеся FIGI
 INSTRUMENTS = {
     "Сбербанк": "BBG004730N88",
     "Газпром": "BBG004730RP0",
@@ -20,7 +18,7 @@ INSTRUMENTS = {
 app = Flask(__name__, static_folder="static")
 CACHE = {}  # кэш для актуальных данных
 
-# ===== Функция расчёта RSI =====
+# ===== Расчёт RSI =====
 def compute_rsi(prices: pd.Series, period: int = 14) -> float:
     delta = prices.diff()
     up = delta.clip(lower=0)
@@ -34,7 +32,7 @@ def compute_rsi(prices: pd.Series, period: int = 14) -> float:
 # ===== Получение свечей и расчёт RSI =====
 def fetch_rsi(client, figi: str, interval: CandleInterval) -> dict:
     now = datetime.utcnow()
-    days = 10 if interval == CandleInterval.CANDLE_INTERVAL_5_MIN else 60
+    days = 60 if interval == CandleInterval.CANDLE_INTERVAL_HOUR else 180  # дневные свечи за 6 мес
     from_ = now - timedelta(days=days)
 
     try:
@@ -45,11 +43,9 @@ def fetch_rsi(client, figi: str, interval: CandleInterval) -> dict:
             interval=interval
         )
         candles = resp.candles
-        if not candles:
+        if not candles or len(candles) < 15:
             return {"RSI": "-", "time": "-"}
         prices = pd.Series([c.c for c in candles])
-        if len(prices) < 15:
-            return {"RSI": "-", "time": "-"}
         rsi_val = compute_rsi(prices)
         last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
         return {"RSI": rsi_val, "time": last_time}
@@ -57,7 +53,7 @@ def fetch_rsi(client, figi: str, interval: CandleInterval) -> dict:
         print(f"[ERROR] fetch_rsi {figi}: {e}")
         return {"RSI": "-", "time": "-"}
 
-# ===== Фоновый поток обновления кеша =====
+# ===== Фоновый поток обновления =====
 def refresh_cache():
     global CACHE
     with Client(TOKEN) as client:
@@ -65,8 +61,8 @@ def refresh_cache():
             results = {}
             for name, figi in INSTRUMENTS.items():
                 results[name] = {
-                    "5m": fetch_rsi(client, figi, CandleInterval.CANDLE_INTERVAL_5_MIN),
                     "1h": fetch_rsi(client, figi, CandleInterval.CANDLE_INTERVAL_HOUR),
+                    "1d": fetch_rsi(client, figi, CandleInterval.CANDLE_INTERVAL_DAY)
                 }
             CACHE = results
             print(f"🔄 Cache updated at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
