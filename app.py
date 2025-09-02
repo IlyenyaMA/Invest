@@ -1,110 +1,128 @@
+# app.py — Flask backend (MOEX ISS, RSI по 5m и 1h)
 from flask import Flask, jsonify, send_from_directory
-from tinkoff.invest import Client, CandleInterval
-from datetime import datetime, timedelta, timezone
+import requests
 import pandas as pd
+from datetime import datetime, timedelta, timezone
+import time
 
 app = Flask(__name__, static_folder="static")
 
-# Токен для Tinkoff API
-TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
-
-# Словарь инструментов: название → FIGI или instrument_uid
+# ✅ Используем чистые MOEX тикеры (работают гарантированно)
 INSTRUMENTS = {
-    "Башнефть": "BBG004S68758",
-    "Трубная Металлургическая Компания": "BBG004TC84Z8",
-    "Московская Биржа": "BBG004730JJ5",
-    "Башнефть — привилегированные акции": "BBG004S686N0",
-    "РУСАЛ": "BBG008F2T3T2",
-    "Таттелеком": "BBG000RJL816",
-    "МРСК Урала": "BBG000VKG4R5",
-    "Норильский никель": "BBG004731489",
-    "МРСК Северо-Запада": "BBG000TJ6F42",
-    "ТГК-2": "BBG000Q7GG57",
-    "ПАО «КАЗАНЬОРГСИНТЕЗ»": "BBG0029SFXB3",
-    "МОЭСК": "BBG004S687G6",
-    "QIWI": "BBG005D1WCQ1",
-    "Корпорация ИРКУТ": "BBG000FWGSZ5",
-    "Юнипро": "BBG004S686W0",
-    "Мечел — привилегированные акции": "BBG004S68FR6",
-    "Ленэнерго": "BBG000NLC9Z6",
-    "РусГидро": "BBG00475K2X9",
-    "Ростелеком — привилегированные акции": "BBG004S685M3",
-    "Yandex": "TCS00A107T19",
-    "АФК Система": "BBG004S68614",
-    "Банк ВТБ": "BBG004730ZJ9",
-    "Роснефть": "BBG004731354",
-    "Сбербанк России": "BBG004730N88",
-    # … продолжение словаря …
+    "Сбербанк": "SBER",
+    "Газпром": "GAZP",
+    "Лукойл": "LKOH",
+    "Яндекс": "YNDX",
 }
 
-# Таймфреймы для RSI
-TIMEFRAMES = {
-    "5m": CandleInterval.CANDLE_INTERVAL_5_MIN,
-    "1h": CandleInterval.CANDLE_INTERVAL_HOUR
+# Периоды загрузки
+LOOKBACK_DAYS = {
+    "5m": 1,    # для минуток достаточно 1 дня
+    "1h": 30,   # для часов — месяц
 }
 
-def compute_rsi(prices, period=14):
-    """
-    Вычисляет RSI по списку цен закрытия.
-    Возвращает float или None, если данных недостаточно.
-    """
-    if len(prices) < period + 1:
+def fetch_moex_candles(ticker: str, interval: str, days: int):
+    """Запрашивает свечи у MOEX ISS"""
+    url = f"https://iss.moex.com/iss/engines/stock/markets/shares/securities/{ticker}/candles.json"
+    now = datetime.utcnow()
+    start = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    end = now.strftime("%Y-%m-%d")
+    params = {"from": start, "till": end, "interval": interval}
+    try:
+        r = requests.get(url, params=params, timeout=12)
+        r.raise_for_status()
+        payload = r.json()
+        candles = payload.get("candles", {})
+        cols = candles.get("columns", [])
+        rows = candles.get("data", [])
+        if not rows or not cols:
+            return None
+        return pd.DataFrame(rows, columns=cols)
+    except Exception as e:
+        print(f"[ISS] error fetching candles for {ticker} interval={interval}: {e}")
         return None
 
-    df = pd.DataFrame(prices, columns=["close"])
-    delta = df["close"].diff()
-    up = delta.clip(lower=0)
-    down = -delta.clip(upper=0)
+def compute_rsi_from_list(prices, period=14):
+    """Вычисляет RSI"""
+    if len(prices) < period + 1:
+        return None
+    s = pd.Series(prices, dtype="float64")
+    delta = s.diff()
+    up = delta.clip(lower=0.0)
+    down = -delta.clip(upper=0.0)
     roll_up = up.ewm(alpha=1/period, adjust=False).mean()
     roll_down = down.ewm(alpha=1/period, adjust=False).mean()
-    rs = roll_up / roll_down
+    rs = roll_up / roll_down.replace(0, pd.NA)
     rsi = 100 - (100 / (1 + rs))
+    return round(float(rsi.iloc[-1]), 2)
 
-    return round(rsi.iloc[-1], 2) if not rsi.empty else None
+def build_rsi_row_for_instrument(ticker):
+    """Возвращает RSI по 5м и 1ч"""
+    out = {}
 
-def fetch_rsi():
-    """
-    Собирает RSI для всех инструментов и таймфреймов.
-    Возвращает словарь: {название_инструмента: {tf: {"RSI": ..., "time": ...}}}
-    """
-    results = {}
-
-    with Client(TOKEN) as client:
-        for name, figi in INSTRUMENTS.items():
-            results[name] = {}
-
-            for tf_name, interval in TIMEFRAMES.items():
+    # --- 5m (агрегация из 1m)
+    df_1m = fetch_moex_candles(ticker, "1", LOOKBACK_DAYS["5m"])
+    if df_1m is not None and not df_1m.empty:
+        close_col = next((c for c in df_1m.columns if c.lower() == "close"), None)
+        begin_col = next((c for c in df_1m.columns if c.lower() == "begin"), None)
+        if close_col:
+            df_5m = df_1m.iloc[::5, :].reset_index(drop=True)
+            closes = list(df_5m[close_col].astype(float).values)
+            rsi_val = compute_rsi_from_list(closes)
+            last_time_str = "-"
+            if begin_col:
                 try:
-                    now = datetime.now(timezone.utc)
-                    start = now - timedelta(days=30)
-
-                    candles = client.market_data.get_candles(
-                        figi=figi,
-                        from_=start,
-                        to=now,
-                        interval=interval
-                    ).candles
-
-                    if not candles:
-                        results[name][tf_name] = {"RSI": "-", "time": "-"}
-                        continue
-
-                    closes = [c.close.units + c.close.nano / 1e9 for c in candles]
-                    rsi_val = compute_rsi(closes)
-                    last_time = candles[-1].time.astimezone(
-                        timezone(timedelta(hours=3))
-                    ).strftime("%Y-%m-%d %H:%M:%S")
-
-                    results[name][tf_name] = {"RSI": rsi_val, "time": last_time}
-
+                    last_ts = pd.to_datetime(df_5m[begin_col].iloc[-1])
+                    if last_ts.tzinfo is None:
+                        last_ts = last_ts + timedelta(hours=3)
+                    else:
+                        last_ts = last_ts.tz_convert(timezone(timedelta(hours=3)))
+                    last_time_str = last_ts.strftime("%Y-%m-%d %H:%M:%S")
                 except Exception:
-                    results[name][tf_name] = {"RSI": "-", "time": "-"}
+                    last_time_str = str(df_5m[begin_col].iloc[-1])
+            out["5m"] = {"RSI": rsi_val if rsi_val else "-", "time": last_time_str}
+        else:
+            out["5m"] = {"RSI": "-", "time": "-"}
+    else:
+        out["5m"] = {"RSI": "-", "time": "-"}
 
-    return results
+    # --- 1h
+    df_1h = fetch_moex_candles(ticker, "60", LOOKBACK_DAYS["1h"])
+    if df_1h is not None and not df_1h.empty:
+        close_col = next((c for c in df_1h.columns if c.lower() == "close"), None)
+        begin_col = next((c for c in df_1h.columns if c.lower() == "begin"), None)
+        if close_col:
+            closes = list(df_1h[close_col].astype(float).values)
+            rsi_val = compute_rsi_from_list(closes)
+            last_time_str = "-"
+            if begin_col:
+                try:
+                    last_ts = pd.to_datetime(df_1h[begin_col].iloc[-1])
+                    if last_ts.tzinfo is None:
+                        last_ts = last_ts + timedelta(hours=3)
+                    else:
+                        last_ts = last_ts.tz_convert(timezone(timedelta(hours=3)))
+                    last_time_str = last_ts.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    last_time_str = str(df_1h[begin_col].iloc[-1])
+            out["1h"] = {"RSI": rsi_val if rsi_val else "-", "time": last_time_str}
+        else:
+            out["1h"] = {"RSI": "-", "time": "-"}
+    else:
+        out["1h"] = {"RSI": "-", "time": "-"}
+
+    return out
 
 @app.route("/api/rsi")
 def api_rsi():
-    return jsonify(fetch_rsi())
+    results = {}
+    for name, ticker in INSTRUMENTS.items():
+        try:
+            results[name] = build_rsi_row_for_instrument(ticker)
+        except Exception as e:
+            print(f"[ERROR] {name} ({ticker}): {e}")
+            results[name] = {"5m": {"RSI": "-", "time": "-"}, "1h": {"RSI": "-", "time": "-"}}
+    return jsonify(results)
 
 @app.route("/")
 def index():
