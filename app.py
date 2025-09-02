@@ -27,125 +27,87 @@ CACHE = {}
 
 # ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
 
-def get_candles(client, figi, start, end, interval):
-    """Загружаем свечи"""
+def calculate_rsi(prices, period: int = 14):
+    """Расчёт RSI по ценам (numpy array)."""
+    deltas = np.diff(prices)
+    seed = deltas[:period]
+    up = seed[seed >= 0].sum() / period
+    down = -seed[seed < 0].sum() / period
+    rs = up / down if down != 0 else 0
+    rsi = np.zeros_like(prices)
+    rsi[:period] = 100. - 100. / (1. + rs)
+
+    up_avg, down_avg = up, down
+    for i in range(period, len(prices)):
+        delta = deltas[i - 1]
+        up_val = max(delta, 0)
+        down_val = -min(delta, 0)
+
+        up_avg = (up_avg * (period - 1) + up_val) / period
+        down_avg = (down_avg * (period - 1) + down_val) / period
+
+        rs = up_avg / down_avg if down_avg != 0 else 0
+        rsi[i] = 100. - 100. / (1. + rs)
+
+    return rsi[-1]
+
+
+def fetch_rsi(client: Client, figi: str, interval: CandleInterval, days: int):
+    """Загружаем свечи и считаем RSI14, включая актуальную цену."""
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+
     candles = client.market_data.get_candles(
         figi=figi,
         from_=start,
-        to=end,
-        interval=interval
-    )
-    return candles.candles
+        to=now,
+        interval=interval,
+    ).candles
 
-
-def candles_to_df(candles):
-    """Перевод свечей в DataFrame"""
     if not candles:
-        return pd.DataFrame()
-    data = [{
-        "time": c.time.replace(tzinfo=TZ),
-        "c": float(c.close.units) + c.close.nano / 1e9
-    } for c in candles]
-    df = pd.DataFrame(data)
-    df.set_index("time", inplace=True)
-    return df
+        return None, None
 
+    prices = np.array([candle.close.units + candle.close.nano / 1e9 for candle in candles])
 
-def compute_rsi_from_list(prices, period=14):
-    """RSI из списка цен"""
-    if len(prices) < period + 1:
-        return None
+    # добавляем актуальную цену (последняя известная котировка)
+    last_price = client.market_data.get_last_prices(figi=[figi]).last_prices[0].price
+    current_price = last_price.units + last_price.nano / 1e9
+    prices = np.append(prices, current_price)
 
-    deltas = np.diff(prices)
-    gains = np.where(deltas > 0, deltas, 0)
-    losses = np.where(deltas < 0, -deltas, 0)
+    rsi = calculate_rsi(prices)
+    return rsi, now.strftime("%Y-%m-%d %H:%M:%S")
 
-    avg_gain = np.mean(gains[:period])
-    avg_loss = np.mean(losses[:period])
-
-    for i in range(period, len(deltas)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-
-    if avg_loss == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
-    return round(100 - (100 / (1 + rs)), 2)
-
-
-def build_rsi_row_for_instrument(client, figi, name):
-    """Формируем строку с RSI для таблицы"""
-    try:
-        now = datetime.now(TZ)
-
-        # --- 1m свечи для пересчёта в 5m ---
-        candles_1m = get_candles(client, figi, now - timedelta(days=7), now, CandleInterval.CANDLE_INTERVAL_1_MIN)
-        df_1m = candles_to_df(candles_1m)
-        if not df_1m.empty:
-            df_5m = df_1m.resample("5T").agg({"c": "last"}).dropna()
-            prices_5m = df_5m["c"].tolist()[-14:]
-        else:
-            prices_5m = []
-
-        # --- часовые свечи ---
-        candles_1h = get_candles(client, figi, now - timedelta(days=10), now, CandleInterval.CANDLE_INTERVAL_HOUR)
-        df_1h = candles_to_df(candles_1h)
-        prices_1h = df_1h["c"].tolist()[-14:] if not df_1h.empty else []
-
-        # --- добавляем актуальную цену ---
-        last_price_resp = client.market_data.get_last_prices(figi=[figi])
-        if last_price_resp.last_prices:
-            lp = last_price_resp.last_prices[0].price
-            last_price = float(lp.units) + lp.nano / 1e9
-            if prices_5m:
-                prices_5m.append(last_price)
-            if prices_1h:
-                prices_1h.append(last_price)
-
-        # --- считаем RSI ---
-        rsi_5m = compute_rsi_from_list(prices_5m)
-        rsi_1h = compute_rsi_from_list(prices_1h)
-
-        return {
-            "instrument": name,
-            "5m": rsi_5m if rsi_5m is not None else "-",
-            "1h": rsi_1h if rsi_1h is not None else "-",
-            "time": now.strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-    except Exception as e:
-        print(f"Ошибка для {name}: {e}")
-        return {"instrument": name, "5m": "-", "1h": "-", "time": "-"}
-
-
-# ===== ОБНОВЛЕНИЕ КЭША =====
 
 def refresh_cache():
-    global CACHE
+    """Фоновое обновление кеша RSI."""
     with Client(TOKEN) as client:
         while True:
-            rows = []
-            for figi, name in INSTRUMENTS.items():
-                row = build_rsi_row_for_instrument(client, figi, name)
-                rows.append(row)
-            CACHE = {"data": rows}
-            time.sleep(60)  # обновление раз в минуту
+            for name, figi in FIGIS.items():
+                try:
+                    rsi_5m, time_5m = fetch_rsi(client, figi, CandleInterval.CANDLE_INTERVAL_5_MIN, days=7)
+                    rsi_1h, time_1h = fetch_rsi(client, figi, CandleInterval.CANDLE_INTERVAL_HOUR, days=10)
+
+                    CACHE[name] = {
+                        "5m": {"rsi": rsi_5m, "time": time_5m},
+                        "1h": {"rsi": rsi_1h, "time": time_1h},
+                    }
+                except Exception as e:
+                    print(f"Ошибка при обновлении {name}: {e}")
+
+            time.sleep(60)  # обновляем каждую минуту
 
 
-# ===== ROUTES =====
-
-@app.route("/")
-def index():
-    return send_from_directory(app.static_folder, "index.html")
-
-
-@app.route("/data")
-def data():
+@app.route("/api/data")
+def get_data():
     return jsonify(CACHE)
 
 
-# ===== MAIN =====
+@app.route("/")
+def index():
+    return send_from_directory("static", "index.html")
+
 
 if __name__ == "__main__":
     threading.Thread(target=refresh_cache, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
+
