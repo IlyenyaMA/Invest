@@ -34,19 +34,23 @@ def compute_rsi(prices: pd.Series, period: int = 14) -> float:
 # ===== Получение свечей и расчёт RSI =====
 def fetch_rsi(client, figi: str, interval: CandleInterval) -> dict:
     now = datetime.now(timezone.utc)
+    start = now - timedelta(days=5)  # берем последние 5 дней
     try:
-        candles = client.market_data.get_candles(
+        response = client.market_data.get_candles(
             figi=figi,
-            from_=now - timedelta(days=5),
+            from_=start,
             to=now,
-            interval=interval,
-        ).candles
+            interval=interval
+        )
+        candles = response.candles  # здесь список объектов свечей
 
         if not candles:
+            print(f"[WARN] Пустые свечи для FIGI {figi}, interval {interval}")
             return {"RSI": "-", "time": "-"}
 
         prices = pd.Series([float(c.c) for c in candles])
         rsi_val = compute_rsi(prices)
+
         last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
 
         return {"RSI": rsi_val, "time": last_time}
@@ -84,4 +88,5 @@ if __name__ == "__main__":
     t = threading.Thread(target=refresh_cache, daemon=True)
     t.start()
     app.run(host="0.0.0.0", port=5000)
+
 
