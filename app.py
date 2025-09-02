@@ -255,7 +255,7 @@ def find_moex_ticker_by_figi_or_uid(instrument_id):
 def fetch_moex_candles(ticker: str, interval: str, days: int):
     """
     Запрашивает candles.json у MOEX ISS для конкретного тикера.
-    Возвращает DataFrame с колонками (case-insensitive) или None.
+    interval: строка, может быть '1', '60'
     """
     url = f"https://iss.moex.com/iss/engines/stock/markets/shares/securities/{ticker}/candles.json"
     now = datetime.utcnow()
@@ -272,22 +272,8 @@ def fetch_moex_candles(ticker: str, interval: str, days: int):
         if not rows or not cols:
             return None
         df = pd.DataFrame(rows, columns=cols)
-        # ищем колонку CLOSE (case-insensitive)
-        close_col = None
-        for c in df.columns:
-            if c.lower() == "close":
-                close_col = c
-                break
-        if close_col is None:
-            return None
-        # приводим CLOSE к float
-        try:
-            df[close_col] = df[close_col].astype(float)
-        except Exception:
-            df[close_col] = pd.to_numeric(df[close_col], errors="coerce")
         return df
     except Exception as e:
-        # логируем и возвращаем None
         print(f"[ISS] error fetching candles for {ticker} interval={interval}: {e}")
         return None
 
@@ -310,62 +296,74 @@ def compute_rsi_from_list(prices, period=14):
 
 def build_rsi_row_for_instrument(instrument_id_raw):
     """
-    По исходному значению из INSTRUMENTS:
-     - пытаемся взять MOEX тикер (если сырой — сразу)
-     - иначе пробуем найти MOEX тикер по FIGI/ISIN/REGNUMBER
-     - затем запрашиваем свечи и считаем RSI для всех TIMEFRAMES
-    Возвращаем dict {tf: {"RSI": val_or "-", "time": str_or "-"}}
+    Возвращает dict с RSI по 5м и 1ч таймфреймам.
     """
     out = {}
-    # возможные MOEX тикеры: если raw уже "SBER" — используем
     instrument_id = str(instrument_id_raw).strip()
-    ticker_candidate = None
 
-    # если уже похоже на MOEX тикер (буквы и длина <=8) — принимаем
+    # ищем тикер
     if instrument_id.isalpha() and len(instrument_id) <= 8:
         ticker_candidate = instrument_id.upper()
     else:
-        # пытаемся найти MOEX тикер по FIGI/ISIN/REGNUMBER/т.п.
         ticker_candidate = find_moex_ticker_by_figi_or_uid(instrument_id)
 
     if ticker_candidate is None:
-        # не смогли сопоставить — возвращаем '-' для всех TF
         for tf in TIMEFRAMES.keys():
             out[tf] = {"RSI": "-", "time": "-"}
         return out
 
-    # для найденного тикера запрашиваем свечи для каждого TF
-    for tf_name, interval in TIMEFRAMES.items():
-        days = LOOKBACK_DAYS.get(tf_name, 30)
-        df = fetch_moex_candles(ticker_candidate, interval, days)
-        if df is None or df.empty:
-            out[tf_name] = {"RSI": "-", "time": "-"}
-            continue
-        # найти имя колонки CLOSE и BEGIN (возможно 'begin' или 'BEGIN')
-        close_col = next((c for c in df.columns if c.lower() == "close"), None)
-        begin_col = next((c for c in df.columns if c.lower() == "begin"), None)
-        if close_col is None:
-            out[tf_name] = {"RSI": "-", "time": "-"}
-            continue
-        closes = list(df[close_col].astype(float).values)
-        rsi_val = compute_rsi_from_list(closes)
-        # время последней свечи
-        last_time_str = "-"
-        if begin_col:
-            try:
-                last_ts = pd.to_datetime(df[begin_col].iloc[-1])
-                # если без tz — считаем как UTC и добавляем +3 часа (МСК)
-                if last_ts.tzinfo is None:
-                    last_ts = last_ts + timedelta(hours=3)
-                else:
-                    # приведение к МСК
-                    last_ts = last_ts.tz_convert(timezone(timedelta(hours=3)))
-                last_time_str = last_ts.strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                last_time_str = str(df[begin_col].iloc[-1])
-        out[tf_name] = {"RSI": rsi_val if rsi_val is not None else "-", "time": last_time_str}
-        # небольшая задержка, чтобы не перегружать ISS
-        time.sleep(0.02)
+    # --- 5m: агрегируем из минуток (interval=1)
+    df_1m = fetch_moex_candles(ticker_candidate, "1", LOOKBACK_DAYS["5m"])
+    if df_1m is not None and not df_1m.empty:
+        close_col = next((c for c in df_1m.columns if c.lower() == "close"), None)
+        begin_col = next((c for c in df_1m.columns if c.lower() == "begin"), None)
+        if close_col:
+            # берём каждую 5-ю свечу как 5m
+            df_5m = df_1m.iloc[::5, :].reset_index(drop=True)
+            closes = list(df_5m[close_col].astype(float).values)
+            rsi_val = compute_rsi_from_list(closes)
+            last_time_str = "-"
+            if begin_col:
+                try:
+                    last_ts = pd.to_datetime(df_5m[begin_col].iloc[-1])
+                    if last_ts.tzinfo is None:
+                        last_ts = last_ts + timedelta(hours=3)
+                    else:
+                        last_ts = last_ts.tz_convert(timezone(timedelta(hours=3)))
+                    last_time_str = last_ts.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    last_time_str = str(df_5m[begin_col].iloc[-1])
+            out["5m"] = {"RSI": rsi_val if rsi_val is not None else "-", "time": last_time_str}
+        else:
+            out["5m"] = {"RSI": "-", "time": "-"}
+    else:
+        out["5m"] = {"RSI": "-", "time": "-"}
+
+    # --- 1h: берём напрямую (interval=60)
+    df_1h = fetch_moex_candles(ticker_candidate, "60", LOOKBACK_DAYS["1h"])
+    if df_1h is not None and not df_1h.empty:
+        close_col = next((c for c in df_1h.columns if c.lower() == "close"), None)
+        begin_col = next((c for c in df_1h.columns if c.lower() == "begin"), None)
+        if close_col:
+            closes = list(df_1h[close_col].astype(float).values)
+            rsi_val = compute_rsi_from_list(closes)
+            last_time_str = "-"
+            if begin_col:
+                try:
+                    last_ts = pd.to_datetime(df_1h[begin_col].iloc[-1])
+                    if last_ts.tzinfo is None:
+                        last_ts = last_ts + timedelta(hours=3)
+                    else:
+                        last_ts = last_ts.tz_convert(timezone(timedelta(hours=3)))
+                    last_time_str = last_ts.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    last_time_str = str(df_1h[begin_col].iloc[-1])
+            out["1h"] = {"RSI": rsi_val if rsi_val is not None else "-", "time": last_time_str}
+        else:
+            out["1h"] = {"RSI": "-", "time": "-"}
+    else:
+        out["1h"] = {"RSI": "-", "time": "-"}
+
     return out
 
 @app.route("/api/rsi")
@@ -387,6 +385,7 @@ def index():
 if __name__ == "__main__":
     # Запускаем локально
     app.run(host="0.0.0.0", port=5000)
+
 
 
 
