@@ -2,25 +2,32 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>RSI Таблица</title>
   <style>
-    body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 20px; }
-    h1 { text-align: center; }
-    .bar { display:flex; gap:12px; align-items:center; justify-content:space-between; max-width:1100px; margin:0 auto; }
-    .bar .left { display:flex; gap:12px; align-items:center; }
-    button { padding: 8px 12px; border:0; border-radius:8px; background:#4CAF50; color:#fff; cursor:pointer; }
+    body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 2vh 2vw; margin:0; }
+    h1 { text-align: center; font-size: 4vw; margin-bottom: 1vh; }
+    .bar { display:flex; flex-wrap: wrap; gap:2vw; align-items:center; justify-content: space-between; margin-bottom:1vh; }
+    .bar .left { display:flex; gap:1vw; flex-wrap: wrap; align-items:center; }
+    button { padding: 0.5vh 1vw; border:0; border-radius:0.5vh; background:#4CAF50; color:#fff; cursor:pointer; font-size:3vw; }
     button:hover { filter: brightness(0.95); }
-    table { width: 100%; border-collapse: collapse; margin-top: 16px; background: #fff; box-shadow: 0 0 10px rgba(0,0,0,0.1); display:block; max-height: 700px; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 0 1vh rgba(0,0,0,0.1); display:block; max-height: 80vh; overflow-y: auto; }
     thead { display: table; width: 100%; table-layout: fixed; }
     tbody { display: block; width: 100%; }
-    th, td { padding: 10px; border: 1px solid #ddd; text-align: center; }
     tr { display: table; width: 100%; table-layout: fixed; }
+    th, td { padding: 1vh 1vw; border: 1px solid #ddd; text-align: center; font-size: 3vw; word-wrap: break-word; }
     th { background-color: #4CAF50; color: white; cursor: pointer; user-select: none; }
     tr:nth-child(even) { background-color: #f9f9f9; }
     tr:hover { background-color: #f1f1f1; }
-    .th-sort::after { content: " ⇅"; font-size: 12px; opacity: .85; }
+    .th-sort::after { content: " ⇅"; font-size: 2vw; opacity: .85; }
     .th-sort.asc::after { content: " ↑"; }
     .th-sort.desc::after { content: " ↓"; }
+    @media (min-width: 768px) {
+      h1 { font-size: 2vw; }
+      button { font-size: 1.2vw; }
+      th, td { font-size: 1vw; padding: 0.5vh 0.5vw; }
+      .th-sort::after { font-size: 0.8vw; }
+    }
   </style>
 </head>
 <body>
@@ -48,7 +55,7 @@
 
 <script>
 let lastData = {};
-let sortState = { tf: null, dir: 'desc' }; // dir: 'asc' | 'desc'
+let sortState = { tf: null, dir: 'desc' };
 
 async function fetchRSI() {
   const status = document.getElementById('status');
@@ -71,7 +78,6 @@ function renderTable() {
 
   let names = Object.keys(lastData);
 
-  // сортировка
   if (sortState.tf) {
     const tf = sortState.tf;
     const dir = sortState.dir === 'asc' ? 1 : -1;
@@ -85,7 +91,6 @@ function renderTable() {
     });
   }
 
-  // создаём весь HTML одной строкой
   let html = '';
   for (const name of names) {
     const r5 = lastData[name]['5m']?.RSI ?? '-';
@@ -94,17 +99,20 @@ function renderTable() {
     const t1 = lastData[name]['1h']?.time ?? '-';
     const lastTime = t5 !== '-' ? t5 : t1;
 
+    // подсветка RSI
+    const r5Style = (r5 !== '-' && !isNaN(r5)) ? (r5 < 30 ? 'background-color:green;color:white;' : r5 > 70 ? 'background-color:red;color:white;' : '') : '';
+    const r1Style = (r1 !== '-' && !isNaN(r1)) ? (r1 < 30 ? 'background-color:green;color:white;' : r1 > 70 ? 'background-color:red;color:white;' : '') : '';
+
     html += `
       <tr>
         <td>${name}</td>
-        <td>${r5}</td>
-        <td>${r1}</td>
+        <td style="${r5Style}">${r5}</td>
+        <td style="${r1Style}">${r1}</td>
         <td>${lastTime}</td>
       </tr>`;
   }
   tbody.innerHTML = html;
 
-  // визуальные индикаторы сортировки
   document.querySelectorAll('.th-sort').forEach(th => th.classList.remove('asc', 'desc'));
   if (sortState.tf) {
     const th = document.querySelector(`.th-sort[data-tf="${sortState.tf}"]`);
@@ -112,7 +120,6 @@ function renderTable() {
   }
 }
 
-// обработчики кликов по заголовкам для сортировки
 document.getElementById('th-5m').addEventListener('click', () => toggleSort('5m'));
 document.getElementById('th-1h').addEventListener('click', () => toggleSort('1h'));
 
@@ -126,13 +133,8 @@ function toggleSort(tf) {
   renderTable();
 }
 
-// кнопка "Обновить"
 document.getElementById('refreshBtn').addEventListener('click', fetchRSI);
-
-// автообновление каждые 5 минут
 setInterval(fetchRSI, 5 * 60 * 1000);
-
-// первый запуск
 fetchRSI();
 </script>
 </body>
