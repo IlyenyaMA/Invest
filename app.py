@@ -1,18 +1,17 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 from tinkoff.invest import Client, CandleInterval
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
-# FIGI инструментов (пример)
+# FIGI инструментов
 INSTRUMENTS = {
     "GAZP": "BBG004730RP0",
     "SBER": "BBG004730N88",
     "LKOH": "BBG004731032"
 }
 
-# Таймфреймы
 TIMEFRAMES = {
     "5m": CandleInterval.CANDLE_INTERVAL_5_MIN,
     "1h": CandleInterval.CANDLE_INTERVAL_HOUR,
@@ -28,7 +27,6 @@ def get_days_for_interval(tf_name):
         return 365
     return 30
 
-# ---- Классический RSI (Wilder) ----
 def rsi(closes, period=14):
     series = pd.Series(closes)
     delta = series.diff()
@@ -44,7 +42,6 @@ def rsi(closes, period=14):
 
     return rsi
 
-# ---- Получение RSI для инструмента ----
 def get_rsi(client, figi, tf_name, interval):
     days = get_days_for_interval(tf_name)
     now = datetime.now(timezone.utc)
@@ -62,7 +59,7 @@ def get_rsi(client, figi, tf_name, interval):
 
     closes = [c.close.units + c.close.nano / 1e9 for c in candles]
 
-    # заменяем последний close на текущую цену
+    # заменяем последний close на актуальную цену
     last_price_resp = client.market_data.get_last_prices(figi=[figi])
     if last_price_resp.last_prices:
         current_price = (
@@ -74,8 +71,12 @@ def get_rsi(client, figi, tf_name, interval):
     rsi_series = rsi(closes, 14)
     return round(rsi_series.iloc[-1], 2)
 
-# ---- Flask ----
-app = Flask(__name__)
+# Flask
+app = Flask(__name__, static_folder="static")
+
+@app.route("/")
+def index():
+    return send_from_directory("static", "index.html")
 
 @app.route("/data")
 def data():
