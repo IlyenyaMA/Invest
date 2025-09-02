@@ -1,44 +1,30 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RSI Таблица</title>
-  <style>
-    body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 2vh 2vw; margin:0; }
-    h1 { text-align: center; font-size: 4vw; margin-bottom: 1vh; }
-    .bar { display:flex; flex-wrap: wrap; gap:2vw; align-items:center; justify-content: space-between; margin-bottom:1vh; }
-    .bar .left { display:flex; gap:1vw; flex-wrap: wrap; align-items:center; }
-    button { padding: 0.5vh 1vw; border:0; border-radius:0.5vh; background:#4CAF50; color:#fff; cursor:pointer; font-size:3vw; }
-    button:hover { filter: brightness(0.95); }
-    table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 0 1vh rgba(0,0,0,0.1); display:block; max-height: 80vh; overflow-y: auto; }
-    thead { display: table; width: 100%; table-layout: fixed; }
-    tbody { display: block; width: 100%; }
-    tr { display: table; width: 100%; table-layout: fixed; }
-    th, td { padding: 1vh 1vw; border: 1px solid #ddd; text-align: center; font-size: 3vw; word-wrap: break-word; }
-    th { background-color: #4CAF50; color: white; cursor: pointer; user-select: none; }
-    tr:nth-child(even) { background-color: #f9f9f9; }
-    tr:hover { background-color: #f1f1f1; }
-    .th-sort::after { content: " ⇅"; font-size: 2vw; opacity: .85; }
-    .th-sort.asc::after { content: " ↑"; }
-    .th-sort.desc::after { content: " ↓"; }
-    @media (min-width: 768px) {
-      h1 { font-size: 2vw; }
-      button { font-size: 1.2vw; }
-      th, td { font-size: 1vw; padding: 0.5vh 0.5vw; }
-      .th-sort::after { font-size: 0.8vw; }
-    }
-  </style>
+<meta charset="UTF-8">
+<title>RSI Таблица</title>
+<style>
+  body { font-family: Arial, sans-serif; margin:0; padding:20px; background:#f0f2f5; }
+  h1 { text-align:center; }
+  .bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; }
+  button { padding:6px 12px; border:none; border-radius:6px; background:#4CAF50; color:#fff; cursor:pointer; }
+  button:hover { filter:brightness(0.9); }
+  table { width:100%; border-collapse: collapse; margin-top:10px; overflow-x:auto; display:block; }
+  th, td { padding:8px; border:1px solid #ddd; text-align:center; white-space: nowrap; }
+  th { background:#4CAF50; color:white; cursor:pointer; }
+  tr:nth-child(even){background:#f9f9f9;}
+  tr:hover {background:#f1f1f1;}
+  .th-sort::after { content:" ⇅"; font-size:10px; opacity:.7; }
+  .th-sort.asc::after { content:" ↑"; }
+  .th-sort.desc::after { content:" ↓"; }
+</style>
 </head>
 <body>
 
 <h1>RSI Таблица</h1>
 <div class="bar">
-  <div class="left">
-    <button id="refreshBtn">Обновить данные</button>
-    <span id="status"></span>
-  </div>
-  <small>Нажми на заголовок «5 минут» или «1 час» для сортировки</small>
+  <button id="refreshBtn">Обновить данные</button>
+  <span id="status">Загрузка...</span>
 </div>
 
 <table id="rsiTable">
@@ -57,85 +43,68 @@
 let lastData = {};
 let sortState = { tf: null, dir: 'desc' };
 
-async function fetchRSI() {
+async function fetchRSI(){
   const status = document.getElementById('status');
   try {
     status.textContent = 'Загрузка...';
-    const res = await fetch('/api/rsi', { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const res = await fetch('/api/rsi', {cache:'no-store'});
     lastData = await res.json();
     status.textContent = 'Обновлено: ' + new Date().toLocaleTimeString();
     renderTable();
-  } catch (e) {
-    console.error('Ошибка загрузки данных:', e);
+  } catch(e){
+    console.error(e);
     status.textContent = 'Ошибка загрузки';
   }
 }
 
-function renderTable() {
+function renderTable(){
   const tbody = document.querySelector('#rsiTable tbody');
   tbody.innerHTML = '';
 
   let names = Object.keys(lastData);
-
-  if (sortState.tf) {
-    const tf = sortState.tf;
-    const dir = sortState.dir === 'asc' ? 1 : -1;
-    names.sort((a, b) => {
-      const va = lastData[a][tf]?.RSI;
-      const vb = lastData[b][tf]?.RSI;
-      const na = (va === '-' || va === null || va === undefined) ? -Infinity : Number(va);
-      const nb = (vb === '-' || vb === null || vb === undefined) ? -Infinity : Number(vb);
-      if (na === nb) return a.localeCompare(b);
-      return (na - nb) * dir;
+  if(sortState.tf){
+    const tf = sortState.tf, dir = sortState.dir==='asc'?1:-1;
+    names.sort((a,b)=>{
+      const va = lastData[a][tf]?.RSI??'-';
+      const vb = lastData[b][tf]?.RSI??'-';
+      const na = va==='-'?-Infinity:Number(va);
+      const nb = vb==='-'?-Infinity:Number(vb);
+      if(na===nb) return a.localeCompare(b);
+      return (na-nb)*dir;
     });
   }
 
-  let html = '';
-  for (const name of names) {
-    const r5 = lastData[name]['5m']?.RSI ?? '-';
-    const r1 = lastData[name]['1h']?.RSI ?? '-';
-    const t5 = lastData[name]['5m']?.time ?? '-';
-    const t1 = lastData[name]['1h']?.time ?? '-';
-    const lastTime = t5 !== '-' ? t5 : t1;
+  for(const name of names){
+    const r5 = lastData[name]['5m']?.RSI??'-';
+    const r1 = lastData[name]['1h']?.RSI??'-';
+    const t5 = lastData[name]['5m']?.time??'-';
+    const t1 = lastData[name]['1h']?.time??'-';
+    const lastTime = t5!=='-'?t5:t1;
 
-    // подсветка RSI
-    const r5Style = (r5 !== '-' && !isNaN(r5)) ? (r5 < 30 ? 'background-color:green;color:white;' : r5 > 70 ? 'background-color:red;color:white;' : '') : '';
-    const r1Style = (r1 !== '-' && !isNaN(r1)) ? (r1 < 30 ? 'background-color:green;color:white;' : r1 > 70 ? 'background-color:red;color:white;' : '') : '';
-
-    html += `
-      <tr>
-        <td>${name}</td>
-        <td style="${r5Style}">${r5}</td>
-        <td style="${r1Style}">${r1}</td>
-        <td>${lastTime}</td>
-      </tr>`;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${name}</td><td>${r5}</td><td>${r1}</td><td>${lastTime}</td>`;
+    tbody.appendChild(tr);
   }
-  tbody.innerHTML = html;
 
-  document.querySelectorAll('.th-sort').forEach(th => th.classList.remove('asc', 'desc'));
-  if (sortState.tf) {
+  document.querySelectorAll('.th-sort').forEach(th=>th.classList.remove('asc','desc'));
+  if(sortState.tf){
     const th = document.querySelector(`.th-sort[data-tf="${sortState.tf}"]`);
-    if (th) th.classList.add(sortState.dir);
+    if(th) th.classList.add(sortState.dir);
   }
 }
 
-document.getElementById('th-5m').addEventListener('click', () => toggleSort('5m'));
-document.getElementById('th-1h').addEventListener('click', () => toggleSort('1h'));
-
-function toggleSort(tf) {
-  if (sortState.tf === tf) {
-    sortState.dir = (sortState.dir === 'asc') ? 'desc' : 'asc';
-  } else {
-    sortState.tf = tf;
-    sortState.dir = 'desc';
-  }
+document.getElementById('th-5m').addEventListener('click', ()=>toggleSort('5m'));
+document.getElementById('th-1h').addEventListener('click', ()=>toggleSort('1h'));
+function toggleSort(tf){
+  if(sortState.tf===tf) sortState.dir = sortState.dir==='asc'?'desc':'asc';
+  else {sortState.tf=tf; sortState.dir='desc';}
   renderTable();
 }
 
 document.getElementById('refreshBtn').addEventListener('click', fetchRSI);
-setInterval(fetchRSI, 5 * 60 * 1000);
+setInterval(fetchRSI, 60*1000); // автообновление каждые 1 мин
 fetchRSI();
 </script>
+
 </body>
 </html>
