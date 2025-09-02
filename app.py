@@ -3,7 +3,7 @@ from tinkoff.invest import Client, CandleInterval
 from datetime import datetime, timedelta, timezone
 from IPython.display import display
 
-TOKEN = "ТВОЙ_ТОКЕН"
+TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
 # Акции/фонды (FIGI должны быть корректными!)
 INSTRUMENTS = {
@@ -120,3 +120,4 @@ display(df.style.applymap(highlight_rsi))
 
 print("\nСортировка по 1h:")
 display(sort_by_tf("1h").style.applymap(highlight_rsi))
+
