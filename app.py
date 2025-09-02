@@ -24,7 +24,15 @@ INSTRUMENTS = {
     "ПАО «КАЗАНЬОРГСИНТЕЗ»": "BBG0029SFXB3",
     "МОЭСК": "BBG004S687G6",
     "QIWI": "BBG005D1WCQ1",
-    
+    "Корпорация ИРКУТ": "BBG000FWGSZ5",
+    "Юнипро": "BBG004S686W0",
+    "Мечел — привилегированные акции": "BBG004S68FR6",
+    "ПАО «КАЗАНЬОРГСИНТЕЗ» — акции привилегированные": "BBG0029SG1C1",
+    "Ленэнерго": "BBG000NLC9Z6",
+    "РусГидро": "BBG00475K2X9",
+    "Ростелеком — привилегированные акции": "BBG004S685M3",
+    "Yandex": "TCS00A107T19",
+    "АФК Система": "BBG004S68614",
 }
 
 TIMEFRAMES = {
@@ -127,5 +135,6 @@ def index():
 if __name__ == "__main__":
     threading.Thread(target=refresh_cache, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
+
 
 
