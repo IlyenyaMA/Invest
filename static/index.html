@@ -4,19 +4,20 @@
 <meta charset="UTF-8">
 <title>RSI Таблица</title>
 <style>
-body { font-family: Arial, sans-serif; padding: 20px; background: #f0f2f5; }
+body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 20px; }
 h1 { text-align: center; }
-table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #fff; box-shadow: 0 0 10px rgba(0,0,0,0.1);}
+table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #fff; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
 th, td { padding: 10px; border: 1px solid #ddd; text-align: center; }
 th { background-color: #4CAF50; color: white; cursor: pointer; }
 tr:nth-child(even) { background-color: #f9f9f9; }
 tr:hover { background-color: #f1f1f1; }
-button { padding: 5px 10px; margin-left: 10px; }
+button { margin-top: 10px; padding: 5px 10px; }
 </style>
 </head>
 <body>
+
 <h1>RSI Таблица</h1>
-<button id="refreshBtn">Обновить</button>
+<button id="refreshBtn">Обновить данные</button>
 <table id="rsiTable">
 <thead>
 <tr>
@@ -30,61 +31,69 @@ button { padding: 5px 10px; margin-left: 10px; }
 </table>
 
 <script>
-let sortDirection = { "5m": true, "1h": true };
-
 async function loadRSI() {
     try {
-        const response = await fetch("/api/rsi");
-        const data = await response.json();
+        const res = await fetch("/api/rsi");
+        const data = await res.json();
         populateTable(data);
-    } catch (err) {
-        console.error(err);
+    } catch (e) {
+        console.error("Ошибка загрузки данных:", e);
     }
 }
 
-function populateTable(data) {
+function populateTable(data, sortTF=null) {
     const tbody = document.querySelector("#rsiTable tbody");
     tbody.innerHTML = "";
-    const sortedNames = Object.keys(data);
 
-    sortedNames.forEach(name => {
+    let names = Object.keys(data);
+    if(sortTF) {
+        names.sort((a,b) => {
+            const valA = data[a][sortTF]?.RSI !== "-" ? data[a][sortTF].RSI : -Infinity;
+            const valB = data[b][sortTF]?.RSI !== "-" ? data[b][sortTF].RSI : -Infinity;
+            return valB - valA;
+        });
+    }
+
+    names.forEach(name => {
+        const r5 = data[name]["5m"]?.RSI ?? "-";
+        const r1 = data[name]["1h"]?.RSI ?? "-";
+        const t5 = data[name]["5m"]?.time ?? "-";
+        const t1 = data[name]["1h"]?.time ?? "-";
+        const lastTime = t5 !== "-" ? t5 : t1;
+
         const row = document.createElement("tr");
-        const rsi5 = data[name]["5m"].RSI ?? "-";
-        const rsi1h = data[name]["1h"].RSI ?? "-";
-        const time5 = data[name]["5m"].time ?? "-";
-        const time1h = data[name]["1h"].time ?? "-";
-        const lastTime = time5 !== "-" ? time5 : time1h;
-
-        row.innerHTML = `<td>${name}</td>
-                         <td>${rsi5}</td>
-                         <td>${rsi1h}</td>
-                         <td>${lastTime}</td>`;
+        row.innerHTML = `<td>${name}</td><td>${r5}</td><td>${r1}</td><td>${lastTime}</td>`;
         tbody.appendChild(row);
     });
 }
 
-function sortTable(tf) {
-    const tbody = document.querySelector("#rsiTable tbody");
-    const rows = Array.from(tbody.querySelectorAll("tr"));
-    const dir = sortDirection[tf] ? 1 : -1;
-    rows.sort((a,b) => {
-        const valA = parseFloat(a.children[tf==="5m"?1:2].innerText) || -Infinity;
-        const valB = parseFloat(b.children[tf==="5m"?1:2].innerText) || -Infinity;
-        return (valA - valB)*dir;
-    });
-    rows.forEach(r => tbody.appendChild(r));
-    sortDirection[tf] = !sortDirection[tf];
-}
-
 document.querySelectorAll("th[data-tf]").forEach(th => {
-    th.addEventListener("click", () => sortTable(th.dataset.tf));
+    th.addEventListener("click", () => {
+        loadRSI().then(() => populateTable(lastData, th.dataset.tf));
+    });
 });
 
-document.getElementById("refreshBtn").addEventListener("click", loadRSI);
+const refreshBtn = document.getElementById("refreshBtn");
+let lastData = {};
+refreshBtn.addEventListener("click", async () => {
+    try {
+        const res = await fetch("/api/rsi");
+        lastData = await res.json();
+        populateTable(lastData);
+    } catch (e) {
+        console.error(e);
+    }
+});
 
-// автообновление каждые 5 минут
+// Автообновление каждые 5 минут
+setInterval(async () => {
+    const res = await fetch("/api/rsi");
+    lastData = await res.json();
+    populateTable(lastData);
+}, 5*60*1000);
+
 loadRSI();
-setInterval(loadRSI, 5*60*1000);
 </script>
+
 </body>
 </html>
