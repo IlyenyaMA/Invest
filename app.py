@@ -1,132 +1,77 @@
-# app.py — Flask backend (MOEX ISS, RSI по 5m и 1h)
-from flask import Flask, jsonify, send_from_directory
-import requests
-import pandas as pd
+from flask import Flask, jsonify
+from tinkoff.invest import Client, CandleInterval
 from datetime import datetime, timedelta, timezone
+import pandas as pd
 import time
+import threading
 
-app = Flask(__name__, static_folder="static")
+# 🔑 твой токен Tinkoff Invest API
+TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
 
-# ✅ Используем чистые MOEX тикеры (работают гарантированно)
+# FIGI для инструментов (пример)
 INSTRUMENTS = {
-    "Сбербанк": "SBER",
-    "Газпром": "GAZP",
-    "Лукойл": "LKOH",
-    "Яндекс": "YNDX",
+    "SBER": "BBG004730N88",
+    "GAZP": "BBG004730RP0",
+    "LKOH": "BBG004731354",
+    "YNDX": "BBG006L8G4H1",
 }
 
-# Периоды загрузки
-LOOKBACK_DAYS = {
-    "5m": 1,    # для минуток достаточно 1 дня
-    "1h": 30,   # для часов — месяц
-}
+app = Flask(__name__)
 
-def fetch_moex_candles(ticker: str, interval: str, days: int):
-    """Запрашивает свечи у MOEX ISS"""
-    url = f"https://iss.moex.com/iss/engines/stock/markets/shares/securities/{ticker}/candles.json"
-    now = datetime.utcnow()
-    start = (now - timedelta(days=days)).strftime("%Y-%m-%d")
-    end = now.strftime("%Y-%m-%d")
-    params = {"from": start, "till": end, "interval": interval}
-    try:
-        r = requests.get(url, params=params, timeout=12)
-        r.raise_for_status()
-        payload = r.json()
-        candles = payload.get("candles", {})
-        cols = candles.get("columns", [])
-        rows = candles.get("data", [])
-        if not rows or not cols:
-            return None
-        return pd.DataFrame(rows, columns=cols)
-    except Exception as e:
-        print(f"[ISS] error fetching candles for {ticker} interval={interval}: {e}")
-        return None
+CACHE = {}  # сюда складываем данные
 
-def compute_rsi_from_list(prices, period=14):
-    """Вычисляет RSI"""
-    if len(prices) < period + 1:
-        return None
-    s = pd.Series(prices, dtype="float64")
-    delta = s.diff()
-    up = delta.clip(lower=0.0)
-    down = -delta.clip(upper=0.0)
-    roll_up = up.ewm(alpha=1/period, adjust=False).mean()
-    roll_down = down.ewm(alpha=1/period, adjust=False).mean()
-    rs = roll_up / roll_down.replace(0, pd.NA)
+# 🔹 функция расчёта RSI
+def compute_rsi(prices: pd.Series, period: int = 14) -> float:
+    delta = prices.diff()
+    up = delta.clip(lower=0)
+    down = -delta.clip(upper=0)
+    roll_up = up.rolling(period).mean()
+    roll_down = down.rolling(period).mean()
+    rs = roll_up / roll_down
     rsi = 100 - (100 / (1 + rs))
-    return round(float(rsi.iloc[-1]), 2)
+    return round(rsi.iloc[-1], 2)
 
-def build_rsi_row_for_instrument(ticker):
-    """Возвращает RSI по 5м и 1ч"""
-    out = {}
+# 🔹 достаём свечи для FIGI
+def fetch_rsi(client, figi: str, interval: CandleInterval, depth: int = 100) -> dict:
+    now = datetime.now(timezone.utc)
+    candles = client.get_market_candles(
+        figi=figi,
+        from_=now - timedelta(days=5),
+        to=now,
+        interval=interval,
+    ).candles
 
-    # --- 5m (агрегация из 1m)
-    df_1m = fetch_moex_candles(ticker, "1", LOOKBACK_DAYS["5m"])
-    if df_1m is not None and not df_1m.empty:
-        close_col = next((c for c in df_1m.columns if c.lower() == "close"), None)
-        begin_col = next((c for c in df_1m.columns if c.lower() == "begin"), None)
-        if close_col:
-            df_5m = df_1m.iloc[::5, :].reset_index(drop=True)
-            closes = list(df_5m[close_col].astype(float).values)
-            rsi_val = compute_rsi_from_list(closes)
-            last_time_str = "-"
-            if begin_col:
-                try:
-                    last_ts = pd.to_datetime(df_5m[begin_col].iloc[-1])
-                    if last_ts.tzinfo is None:
-                        last_ts = last_ts + timedelta(hours=3)
-                    else:
-                        last_ts = last_ts.tz_convert(timezone(timedelta(hours=3)))
-                    last_time_str = last_ts.strftime("%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    last_time_str = str(df_5m[begin_col].iloc[-1])
-            out["5m"] = {"RSI": rsi_val if rsi_val else "-", "time": last_time_str}
-        else:
-            out["5m"] = {"RSI": "-", "time": "-"}
-    else:
-        out["5m"] = {"RSI": "-", "time": "-"}
+    if not candles:
+        return {"RSI": None, "time": None}
 
-    # --- 1h
-    df_1h = fetch_moex_candles(ticker, "60", LOOKBACK_DAYS["1h"])
-    if df_1h is not None and not df_1h.empty:
-        close_col = next((c for c in df_1h.columns if c.lower() == "close"), None)
-        begin_col = next((c for c in df_1h.columns if c.lower() == "begin"), None)
-        if close_col:
-            closes = list(df_1h[close_col].astype(float).values)
-            rsi_val = compute_rsi_from_list(closes)
-            last_time_str = "-"
-            if begin_col:
-                try:
-                    last_ts = pd.to_datetime(df_1h[begin_col].iloc[-1])
-                    if last_ts.tzinfo is None:
-                        last_ts = last_ts + timedelta(hours=3)
-                    else:
-                        last_ts = last_ts.tz_convert(timezone(timedelta(hours=3)))
-                    last_time_str = last_ts.strftime("%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    last_time_str = str(df_1h[begin_col].iloc[-1])
-            out["1h"] = {"RSI": rsi_val if rsi_val else "-", "time": last_time_str}
-        else:
-            out["1h"] = {"RSI": "-", "time": "-"}
-    else:
-        out["1h"] = {"RSI": "-", "time": "-"}
+    prices = pd.Series([float(c.c) for c in candles])
+    rsi_val = compute_rsi(prices)
 
-    return out
+    return {
+        "RSI": rsi_val,
+        "time": candles[-1].time.isoformat()
+    }
+
+# 🔹 фоновое обновление кэша
+def refresh_cache():
+    global CACHE
+    with Client(TOKEN) as client:
+        while True:
+            results = {}
+            for name, figi in INSTRUMENTS.items():
+                results[name] = {
+                    "5m": fetch_rsi(client, figi, CandleInterval.CANDLE_INTERVAL_5_MIN),
+                    "1h": fetch_rsi(client, figi, CandleInterval.CANDLE_INTERVAL_HOUR),
+                }
+            CACHE = results
+            print("🔄 Cache updated", datetime.now())
+            time.sleep(60)  # обновляем раз в минуту
 
 @app.route("/api/rsi")
 def api_rsi():
-    results = {}
-    for name, ticker in INSTRUMENTS.items():
-        try:
-            results[name] = build_rsi_row_for_instrument(ticker)
-        except Exception as e:
-            print(f"[ERROR] {name} ({ticker}): {e}")
-            results[name] = {"5m": {"RSI": "-", "time": "-"}, "1h": {"RSI": "-", "time": "-"}}
-    return jsonify(results)
-
-@app.route("/")
-def index():
-    return send_from_directory(app.static_folder, "index.html")
+    return jsonify(CACHE)
 
 if __name__ == "__main__":
+    t = threading.Thread(target=refresh_cache, daemon=True)
+    t.start()
     app.run(host="0.0.0.0", port=5000)
