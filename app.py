@@ -1,246 +1,122 @@
-# app.py — Flask backend (MOEX ISS, с автоопределением MOEX тикера по FIGI/TCS)
-from flask import Flask, jsonify, send_from_directory
-import requests
 import pandas as pd
+from tinkoff.invest import Client, CandleInterval
 from datetime import datetime, timedelta, timezone
-import time
-from functools import lru_cache
-import os
+from IPython.display import display
 
-app = Flask(__name__, static_folder="static")
+TOKEN = "ТВОЙ_ТОКЕН"
 
-# --- Тут оставь свой INSTRUMENTS (может быть FIGI/TCS или MOEX тикер) ---
+# Акции/фонды (FIGI должны быть корректными!)
 INSTRUMENTS = {
-    # примеры — можно оставить FIGI или MOEX тикер. Код автоматически постарается найти MOEX тикер.
     "Сбербанк": "BBG004730N88",
     "Газпром": "BBG004730RP0",
     "Лукойл": "BBG004730ZJ9",
-    "Яндекс": "TCS00A107T19",
-    # можно также прямо MOEX тикеры:
-    # "Сбербанк (MOEX)": "SBER",
+    "Яндекс": "BBG006L8G4H1",  # заменил на корректный FIGI из Тинькофф
+    "Фонд крупнейшие компании РФ": "TCS00A102F40",  # реальный FIGI фонда
+    "Фонд золото": "TCS00A100FQ8"  # реальный FIGI фонда золота
 }
 
-# Таймфреймы и lookback
+# Таймфреймы
 TIMEFRAMES = {
-    "5m": "5",
-    "1h": "60",
+    "5m": CandleInterval.CANDLE_INTERVAL_5_MIN,
+    "15m": CandleInterval.CANDLE_INTERVAL_15_MIN,
+    "1h": CandleInterval.CANDLE_INTERVAL_HOUR,
+    "4h": CandleInterval.CANDLE_INTERVAL_4_HOUR,
+    "1d": CandleInterval.CANDLE_INTERVAL_DAY,
+    "1w": CandleInterval.CANDLE_INTERVAL_WEEK
 }
 
-LOOKBACK_DAYS = {
-    "5m": 3,
-    "1h": 60,
-}
+# Периоды подкачки истории
+def get_days_for_interval(tf_name):
+    if tf_name in ["5m", "15m"]:
+        return 7
+    elif tf_name in ["1h", "4h"]:
+        return 60
+    elif tf_name == "1d":
+        return 365
+    elif tf_name == "1w":
+        return 5*365
+    return 30
 
-# --- Утилиты для работы с MOEX ISS ---
+# Перевод Quotation → float
+def quotation_to_float(q):
+    return q.units + q.nano / 1e9
 
-@lru_cache(maxsize=1)
-def download_all_securities():
-    """
-    Скачивает таблицу securities.json один раз и кэширует.
-    Возвращает tuple(columns_list, rows_list).
-    """
-    url = "https://iss.moex.com/iss/securities.json"
-    try:
-        r = requests.get(url, params={"iss.meta": "off"}, timeout=15)
-        r.raise_for_status()
-        payload = r.json()
-        sec = payload.get("securities", {})
-        cols = sec.get("columns", [])
-        rows = sec.get("data", [])
-        return cols, rows
-    except Exception as e:
-        print(f"[ISS] Ошибка при загрузке securities.json: {e}")
-        return [], []
-
-def find_moex_ticker_by_figi_or_uid(instrument_id):
-    """
-    Пытается найти MOEX SECID по FIGI/TCS/etc.
-    Возвращает SECID (строка) или None.
-    """
-    if not instrument_id:
-        return None
-
-    # Если строка выглядит как обычный MOEX тикер (только буквы, длина <= 8), считаем, что это тикер
-    # (на всякий случай приводим к верхнему регистру)
-    s = str(instrument_id).strip()
-    if s.isalpha() and len(s) <= 8:
-        return s.upper()
-
-    # Иначе ищем в securities.json по FIGI, ISIN, REGNUMBER, or INSTRUMENT_UID-like fields
-    cols, rows = download_all_securities()
-    if not cols or not rows:
-        return None
-
-    # создание словаря colname->index (lowercase)
-    colmap = {c.lower(): i for i, c in enumerate(cols)}
-
-    # потенциальные поля для сравнения
-    candidates = []
-    # FIGI
-    if "figi" in colmap:
-        candidates.append(("figi", colmap["figi"]))
-    # instrument_id может соответствовать "secid"
-    if "secid" in colmap:
-        candidates.append(("secid", colmap["secid"]))
-    # isin
-    if "isin" in colmap:
-        candidates.append(("isin", colmap["isin"]))
-    # regnumber
-    if "regnumber" in colmap:
-        candidates.append(("regnumber", colmap["regnumber"]))
-    # попробовать и другие поля, если есть
-    # Ищем по строковому совпадению (case-insensitive)
-    target = s.lower()
-    for row in rows:
-        try:
-            for name, idx in candidates:
-                cell = row[idx]
-                if cell is None:
-                    continue
-                if str(cell).lower() == target:
-                    # вернём SECID
-                    if "secid" in colmap:
-                        secid = row[colmap["secid"]]
-                        if secid:
-                            return str(secid).upper()
-                    # если нет secid — возврат None
-        except Exception:
-            continue
-    # если не нашли — возвращаем None
-    return None
-
-def fetch_moex_candles(ticker: str, interval: str, days: int):
-    """
-    Запрашивает candles.json у MOEX ISS для конкретного тикера.
-    Возвращает DataFrame с колонками (case-insensitive) или None.
-    """
-    url = f"https://iss.moex.com/iss/engines/stock/markets/shares/securities/{ticker}/candles.json"
-    now = datetime.utcnow()
-    start = (now - timedelta(days=days)).strftime("%Y-%m-%d")
-    end = now.strftime("%Y-%m-%d")
-    params = {"from": start, "till": end, "interval": interval}
-    try:
-        r = requests.get(url, params=params, timeout=12)
-        r.raise_for_status()
-        payload = r.json()
-        candles = payload.get("candles", {})
-        cols = candles.get("columns", [])
-        rows = candles.get("data", [])
-        if not rows or not cols:
-            return None
-        df = pd.DataFrame(rows, columns=cols)
-        # ищем колонку CLOSE (case-insensitive)
-        close_col = None
-        for c in df.columns:
-            if c.lower() == "close":
-                close_col = c
-                break
-        if close_col is None:
-            return None
-        # приводим CLOSE к float
-        try:
-            df[close_col] = df[close_col].astype(float)
-        except Exception:
-            df[close_col] = pd.to_numeric(df[close_col], errors="coerce")
-        return df
-    except Exception as e:
-        # логируем и возвращаем None
-        print(f"[ISS] error fetching candles for {ticker} interval={interval}: {e}")
-        return None
-
-def compute_rsi_from_list(prices, period=14):
-    """RSI via pandas EWM. Возвращает float или None."""
-    if len(prices) < period + 1:
-        return None
-    s = pd.Series(prices, dtype="float64")
-    delta = s.diff()
-    up = delta.clip(lower=0.0)
-    down = -delta.clip(upper=0.0)
+# RSI
+def rsi(series, period=14):
+    delta = series.diff()
+    up = delta.clip(lower=0)
+    down = -delta.clip(upper=0)
     roll_up = up.ewm(alpha=1/period, adjust=False).mean()
     roll_down = down.ewm(alpha=1/period, adjust=False).mean()
-    rs = roll_up / roll_down.replace(0, pd.NA)
-    rsi = 100 - (100 / (1 + rs))
+    rs = roll_up / roll_down
+    return 100 - (100 / (1 + rs))
+
+# Получение RSI
+def get_rsi(client, figi, tf_name, interval):
+    days = get_days_for_interval(tf_name)
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+
     try:
-        return round(float(rsi.iloc[-1]), 2)
-    except Exception:
-        return None
+        candles = client.market_data.get_candles(
+            figi=figi,
+            from_=start,
+            to=now,
+            interval=interval
+        ).candles
+    except Exception as e:
+        print(f"Ошибка для FIGI {figi} ({tf_name}): {e}")
+        return None, None
 
-def build_rsi_row_for_instrument(instrument_id_raw):
-    """
-    По исходному значению из INSTRUMENTS:
-     - пытаемся взять MOEX тикер (если сырой — сразу)
-     - иначе пробуем найти MOEX тикер по FIGI/ISIN/REGNUMBER
-     - затем запрашиваем свечи и считаем RSI для всех TIMEFRAMES
-    Возвращаем dict {tf: {"RSI": val_or "-", "time": str_or "-"}}
-    """
-    out = {}
-    # возможные MOEX тикеры: если raw уже "SBER" — используем
-    instrument_id = str(instrument_id_raw).strip()
-    ticker_candidate = None
+    if not candles or len(candles) < 15:
+        return None, None
 
-    # если уже похоже на MOEX тикер (буквы и длина <=8) — принимаем
-    if instrument_id.isalpha() and len(instrument_id) <= 8:
-        ticker_candidate = instrument_id.upper()
-    else:
-        # пытаемся найти MOEX тикер по FIGI/ISIN/REGNUMBER/т.п.
-        ticker_candidate = find_moex_ticker_by_figi_or_uid(instrument_id)
+    closes = [quotation_to_float(c.close) for c in candles]
+    rsi_val = round(rsi(pd.Series(closes)).iloc[-1], 2)
+    last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
+    return rsi_val, last_time
 
-    if ticker_candidate is None:
-        # не смогли сопоставить — возвращаем '-' для всех TF
-        for tf in TIMEFRAMES.keys():
-            out[tf] = {"RSI": "-", "time": "-"}
-        return out
+# Подсветка RSI
+def highlight_rsi(val):
+    try:
+        rsi_val = float(val.split(" ")[0])
+        if rsi_val < 30 or rsi_val > 70:
+            return "background-color: lightgreen"
+    except:
+        pass
+    return ""
 
-    # для найденного тикера запрашиваем свечи для каждого TF
+# Сбор данных
+results = {}
+
+with Client(TOKEN) as client:
+    for name in INSTRUMENTS:
+        results[name] = {}
     for tf_name, interval in TIMEFRAMES.items():
-        days = LOOKBACK_DAYS.get(tf_name, 30)
-        df = fetch_moex_candles(ticker_candidate, interval, days)
-        if df is None or df.empty:
-            out[tf_name] = {"RSI": "-", "time": "-"}
-            continue
-        # найти имя колонки CLOSE и BEGIN (возможно 'begin' или 'BEGIN')
-        close_col = next((c for c in df.columns if c.lower() == "close"), None)
-        begin_col = next((c for c in df.columns if c.lower() == "begin"), None)
-        if close_col is None:
-            out[tf_name] = {"RSI": "-", "time": "-"}
-            continue
-        closes = list(df[close_col].astype(float).values)
-        rsi_val = compute_rsi_from_list(closes)
-        # время последней свечи
-        last_time_str = "-"
-        if begin_col:
-            try:
-                last_ts = pd.to_datetime(df[begin_col].iloc[-1])
-                # если без tz — считаем как UTC и добавляем +3 часа (МСК)
-                if last_ts.tzinfo is None:
-                    last_ts = last_ts + timedelta(hours=3)
-                else:
-                    # приведение к МСК
-                    last_ts = last_ts.tz_convert(timezone(timedelta(hours=3)))
-                last_time_str = last_ts.strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                last_time_str = str(df[begin_col].iloc[-1])
-        out[tf_name] = {"RSI": rsi_val if rsi_val is not None else "-", "time": last_time_str}
-        # небольшая задержка, чтобы не перегружать ISS
-        time.sleep(0.02)
-    return out
+        for name, figi in INSTRUMENTS.items():
+            val, last_time = get_rsi(client, figi, tf_name, interval)
+            if val is not None:
+                results[name][tf_name] = f"{val} ({last_time})"
+            else:
+                results[name][tf_name] = "-"
 
-@app.route("/api/rsi")
-def api_rsi():
-    results = {}
-    # Для всех инструментов собираем данные
-    for name, instrument_id in INSTRUMENTS.items():
-        try:
-            results[name] = build_rsi_row_for_instrument(instrument_id)
-        except Exception as e:
-            print(f"[ERROR] {name} ({instrument_id}): {e}")
-            results[name] = {tf: {"RSI": "-", "time": "-"} for tf in TIMEFRAMES.keys()}
-    return jsonify(results)
+# Таблица
+df = pd.DataFrame(results).T
 
-@app.route("/")
-def index():
-    return send_from_directory(app.static_folder, "index.html")
+# Сортировка по RSI (по столбцу)
+def sort_by_tf(tf_name):
+    if tf_name not in df.columns:
+        print(f"Нет такого ТФ: {tf_name}")
+        return df
+    sorted_df = df.copy()
+    sorted_df["_sort"] = sorted_df[tf_name].apply(
+        lambda x: float(x.split()[0]) if x != "-" else float("inf")
+    )
+    sorted_df = sorted_df.sort_values("_sort").drop(columns="_sort")
+    return sorted_df
 
-if __name__ == "__main__":
-    # Запускаем локально
-    app.run(host="0.0.0.0", port=5000)
+print("RSI14 таблица (RSI14 + время последней свечи, МСК):")
+display(df.style.applymap(highlight_rsi))
+
+print("\nСортировка по 1h:")
+display(sort_by_tf("1h").style.applymap(highlight_rsi))
