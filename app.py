@@ -10,10 +10,11 @@ TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUx
 
 # FIGI инструментов (пример)
 INSTRUMENTS = {
-    "Сбербанк": "BBG004730N88",
-    "Газпром": "BBG004730RP0",
-    "Лукойл": "BBG004731354",
-    "Яндекс": "BBG006L8G4H1",
+    "Башнефть": "BBG004S68758",
+    "Трубная Металлургическая Компания": "BBG004TC84Z8",
+    "Московская Биржа": "BBG004730JJ5",
+    "Башнефть — привилегированные акции": "BBG004S686N0",
+    "РУСАЛ": "BBG008F2T3T2"
 }
 
 app = Flask(__name__, static_folder="static")
@@ -83,3 +84,4 @@ if __name__ == "__main__":
     t = threading.Thread(target=refresh_cache, daemon=True)
     t.start()
     app.run(host="0.0.0.0", port=5000)
+
