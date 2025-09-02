@@ -4,20 +4,44 @@
   <meta charset="UTF-8" />
   <title>RSI Таблица</title>
   <style>
-    body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 20px; }
-    h1 { text-align: center; }
-    .bar { display:flex; gap:12px; align-items:center; justify-content:space-between; max-width:1100px; margin:0 auto; }
-    .bar .left { display:flex; gap:12px; align-items:center; }
+    body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 20px; margin:0; }
+    h1 { text-align: center; margin-bottom: 16px; }
+    .bar { display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap: wrap; max-width: 100%; margin:0 auto; }
+    .bar .left { display:flex; gap:12px; align-items:center; flex-wrap: wrap; }
     button { padding: 8px 12px; border:0; border-radius:8px; background:#4CAF50; color:#fff; cursor:pointer; }
     button:hover { filter: brightness(0.95); }
-    table { width: 100%; border-collapse: collapse; margin-top: 16px; background: #fff; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-    th, td { padding: 10px; border: 1px solid #ddd; text-align: center; }
-    th { background-color: #4CAF50; color: white; cursor: pointer; user-select: none; }
+    .table-container {
+      width: 100%;
+      overflow-x: auto;
+      overflow-y: auto;
+      max-height: 80vh;
+      margin-top: 16px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    table {
+      width: 100%;
+      min-width: 700px;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 10px;
+      border: 1px solid #ddd;
+      text-align: center;
+      white-space: nowrap;
+    }
+    th { background-color: #4CAF50; color: white; cursor: pointer; user-select: none; position: sticky; top: 0; z-index: 1; }
     tr:nth-child(even) { background-color: #f9f9f9; }
     tr:hover { background-color: #f1f1f1; }
     .th-sort::after { content: " ⇅"; font-size: 12px; opacity: .85; }
     .th-sort.asc::after { content: " ↑"; }
     .th-sort.desc::after { content: " ↓"; }
+
+    /* RSI Coloring */
+    td.rsi-high { background-color: #f28b82; color: #000; font-weight: bold; }
+    td.rsi-low { background-color: #ccff90; color: #000; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -31,21 +55,23 @@
     <small>Нажми на заголовок «5 минут» или «1 час» для сортировки</small>
   </div>
 
-  <table id="rsiTable">
-    <thead>
-      <tr>
-        <th>Инструмент</th>
-        <th id="th-5m" class="th-sort" data-tf="5m">5 минут</th>
-        <th id="th-1h" class="th-sort" data-tf="1h">1 час</th>
-        <th>Время последней свечи</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div class="table-container">
+    <table id="rsiTable">
+      <thead>
+        <tr>
+          <th>Инструмент</th>
+          <th id="th-5m" class="th-sort" data-tf="5m">5 минут</th>
+          <th id="th-1h" class="th-sort" data-tf="1h">1 час</th>
+          <th>Время последней свечи</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
 
   <script>
     let lastData = {};
-    let sortState = { tf: null, dir: 'desc' }; // dir: 'asc' | 'desc'
+    let sortState = { tf: null, dir: 'desc' };
 
     async function fetchRSI() {
       const status = document.getElementById('status');
@@ -68,7 +94,6 @@
 
       let names = Object.keys(lastData);
 
-      // сортировка, если выбрано поле
       if (sortState.tf) {
         const tf = sortState.tf;
         const dir = sortState.dir === 'asc' ? 1 : -1;
@@ -90,16 +115,23 @@
         const lastTime = t5 !== '-' ? t5 : t1;
 
         const tr = document.createElement('tr');
+
+        function rsiClass(val) {
+          if (val === '-' || val === null || val === undefined) return '';
+          if (val > 70) return 'rsi-high';
+          if (val < 30) return 'rsi-low';
+          return '';
+        }
+
         tr.innerHTML = `
           <td>${name}</td>
-          <td>${r5}</td>
-          <td>${r1}</td>
+          <td class="${rsiClass(r5)}">${r5}</td>
+          <td class="${rsiClass(r1)}">${r1}</td>
           <td>${lastTime}</td>
         `;
         tbody.appendChild(tr);
       }
 
-      // визуальные индикаторы сортировки
       document.querySelectorAll('.th-sort').forEach(th => th.classList.remove('asc', 'desc'));
       if (sortState.tf) {
         const th = document.querySelector(`.th-sort[data-tf="${sortState.tf}"]`);
@@ -107,13 +139,8 @@
       }
     }
 
-    // обработчики кликов по заголовкам для сортировки
-    document.getElementById('th-5m').addEventListener('click', () => {
-      toggleSort('5m');
-    });
-    document.getElementById('th-1h').addEventListener('click', () => {
-      toggleSort('1h');
-    });
+    document.getElementById('th-5m').addEventListener('click', () => toggleSort('5m'));
+    document.getElementById('th-1h').addEventListener('click', () => toggleSort('1h'));
 
     function toggleSort(tf) {
       if (sortState.tf === tf) {
@@ -125,13 +152,10 @@
       renderTable();
     }
 
-    // Кнопка "Обновить"
     document.getElementById('refreshBtn').addEventListener('click', fetchRSI);
 
-    // Автообновление каждые 5 минут
     setInterval(fetchRSI, 5 * 60 * 1000);
 
-    // Первый запуск
     fetchRSI();
   </script>
 </body>
