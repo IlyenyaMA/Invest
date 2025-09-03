@@ -111,9 +111,13 @@
 
       for (const name of names) {
         const r5 = lastData[name]['5m']?.RSI ?? '-';
+        const r15 = lastData[name]['15m']?.RSI ?? '-';
         const r1 = lastData[name]['1h']?.RSI ?? '-';
+        const r1d = lastData[name]['1d']?.RSI ?? '-';
         const t5 = lastData[name]['5m']?.time ?? '-';
+        const t15 = lastData[name]['15m']?.time ?? '-';
         const t1 = lastData[name]['1h']?.time ?? '-';
+        const t1d = lastData[name]['1d']?.time ?? '-';
         const lastTime = t5 !== '-' ? t5 : t1;
 
         const tr = document.createElement('tr');
