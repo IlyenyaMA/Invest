@@ -52,7 +52,7 @@
       <button id="refreshBtn">Обновить данные</button>
       <span id="status"></span>
     </div>
-    <small>Нажми на заголовок «5 минут» или «1 час» для сортировки</small>
+    <small>Нажми на заголовок ТФ для сортировки</small>
   </div>
 
   <div class="table-container">
@@ -61,7 +61,9 @@
         <tr>
           <th>Инструмент</th>
           <th id="th-5m" class="th-sort" data-tf="5m">5 минут</th>
+          <th id="th-15m" class="th-sort" data-tf="15m">15 минут</th>
           <th id="th-1h" class="th-sort" data-tf="1h">1 час</th>
+          <th id="th-1d" class="th-sort" data-tf="1d">1 день</th>
           <th>Время последней свечи</th>
         </tr>
       </thead>
@@ -140,7 +142,9 @@
     }
 
     document.getElementById('th-5m').addEventListener('click', () => toggleSort('5m'));
+    document.getElementById('th-15m').addEventListener('click', () => toggleSort('15m'));
     document.getElementById('th-1h').addEventListener('click', () => toggleSort('1h'));
+    document.getElementById('th-1d').addEventListener('click', () => toggleSort('1d'));
 
     function toggleSort(tf) {
       if (sortState.tf === tf) {
