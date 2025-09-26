@@ -163,14 +163,14 @@ INSTRUMENTS = {
 
 TIMEFRAMES = {
     "5m": CandleInterval.CANDLE_INTERVAL_5_MIN,
-    "15m": CandleInterval.CANDLE_INTERVAL_15_MIN,
+    #"15m": CandleInterval.CANDLE_INTERVAL_15_MIN,
     "1h": CandleInterval.CANDLE_INTERVAL_HOUR,
     "1d": CandleInterval.CANDLE_INTERVAL_DAY
 }
 
 LOOKBACK_DAYS = {
     "5m": 7,    # последние 7 дней
-    "15m": 7,
+    #"15m": 7,
     "1h": 10,   # последние 10 дней
     "1d": 365
 }
@@ -265,6 +265,7 @@ def index():
 if __name__ == "__main__":
     threading.Thread(target=refresh_cache, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
+
 
 
 
