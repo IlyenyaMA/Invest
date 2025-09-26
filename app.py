@@ -102,7 +102,6 @@ INSTRUMENTS = {
     "МРСК Юга": "BBG000C7P5M7",
     "ОВК": "TCS90A0JVBT9",
     "Пермэнергосбыт": "BBG000MZL0Y6",
-    "Белуга Групп ПАО ао": "BBG000TY1CD1",
     "ДВМП": "BBG000QF1Q17",
     "МКБ": "BBG009GSYN76",
     "Мостотрест": "BBG004S68DD6",
@@ -262,6 +261,7 @@ def index():
 if __name__ == "__main__":
     threading.Thread(target=refresh_cache, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
+
 
 
 
