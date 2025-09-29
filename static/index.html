@@ -61,7 +61,7 @@
         <tr>
           <th>Инструмент</th>
           <th id="th-5m" class="th-sort" data-tf="5m">5 минут</th>
-          <!--<th id="th-15m" class="th-sort" data-tf="15m">15 минут</th>-->
+          <th id="th-15m" class="th-sort" data-tf="15m">15 минут</th>
           <th id="th-1h" class="th-sort" data-tf="1h">1 час</th>
           <th id="th-1d" class="th-sort" data-tf="1d">1 день</th>
           <!--<th>Время последней свечи</th>-->
@@ -111,11 +111,11 @@
 
       for (const name of names) {
         const r5 = lastData[name]['5m']?.RSI ?? '-';
-        //const r15 = lastData[name]['15m']?.RSI ?? '-';
+        const r15 = lastData[name]['15m']?.RSI ?? '-';
         const r1 = lastData[name]['1h']?.RSI ?? '-';
         const r1d = lastData[name]['1d']?.RSI ?? '-';
         const t5 = lastData[name]['5m']?.time ?? '-';
-        //const t15 = lastData[name]['15m']?.time ?? '-';
+        const t15 = lastData[name]['15m']?.time ?? '-';
         const t1 = lastData[name]['1h']?.time ?? '-';
         const t1d = lastData[name]['1d']?.time ?? '-';
         const lastTime = t5 !== '-' ? t5 : t1;
@@ -148,7 +148,7 @@
     }
 
     document.getElementById('th-5m').addEventListener('click', () => toggleSort('5m'));
-    //document.getElementById('th-15m').addEventListener('click', () => toggleSort('15m'));
+    document.getElementById('th-15m').addEventListener('click', () => toggleSort('15m'));
     document.getElementById('th-1h').addEventListener('click', () => toggleSort('1h'));
     document.getElementById('th-1d').addEventListener('click', () => toggleSort('1d'));
 
