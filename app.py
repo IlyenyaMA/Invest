@@ -159,15 +159,13 @@ INSTRUMENTS = {
 
 TIMEFRAMES = {
     "5m": CandleInterval.CANDLE_INTERVAL_5_MIN,
-    "15m": CandleInterval.CANDLE_INTERVAL_15_MIN,
     "1h": CandleInterval.CANDLE_INTERVAL_HOUR,
-    "1d": CandleInterval.CANDLE_INTERVAL_DAY
+    "1d": CandleInterval.CANDLE_INTERVAL_DAY,
 }
 
 LOOKBACK_DAYS = {
-    "5m": 7,    # последние 7 дней
-    "15m": 7,
-    "1h": 10,   # последние 10 дней
+    "5m": 7,
+    "1h": 10,
     "1d": 365
 }
 
@@ -204,10 +202,10 @@ def get_rsi(client, figi, tf_name, interval):
         candles = candles_resp.candles
     except Exception as e:
         print(f"[ERROR] FIGI {figi} ({tf_name}): {e}")
-        return None, None
+        return None
 
     if not candles or len(candles) < RSI_PERIOD:
-        return None, None
+        return None
 
     closes = [c.close.units + c.close.nano / 1e9 for c in candles]
 
@@ -224,8 +222,7 @@ def get_rsi(client, figi, tf_name, interval):
         print(f"[WARN] Не удалось получить last_price для {figi}: {e}")
 
     rsi_val = round(rsi(pd.Series(closes)).iloc[-1], 2)
-    last_time = candles[-1].time.astimezone(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S")
-    return rsi_val, last_time
+    return rsi_val
 
 # ------------------- Фоновое обновление кэша -------------------
 def refresh_cache():
@@ -236,11 +233,8 @@ def refresh_cache():
             for name, figi in INSTRUMENTS.items():
                 row = {}
                 for tf_name, interval in TIMEFRAMES.items():
-                    val, last_time = get_rsi(client, figi, tf_name, interval)
-                    if val is not None:
-                        row[tf_name] = {"RSI": val, "time": last_time}
-                    else:
-                        row[tf_name] = {"RSI": "-", "time": "-"}
+                    val = get_rsi(client, figi, tf_name, interval)
+                    row[tf_name] = {"RSI": val if val is not None else "-"}
                 new_cache[name] = row
         with CACHE_LOCK:
             RSI_CACHE = new_cache
@@ -261,6 +255,7 @@ def index():
 if __name__ == "__main__":
     threading.Thread(target=refresh_cache, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
+
 
 
 
