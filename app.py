@@ -9,8 +9,10 @@ app = Flask(__name__, static_folder="static")
 
 # ------------------- НАСТРОЙКИ -------------------
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
+
+# пример сокращённого списка для теста (оставь свои инструменты)
 INSTRUMENTS = {
-    "Башнефть": "BBG004S68758",
+        "Башнефть": "BBG004S68758",
     "Трубная Металлургическая Компания": "BBG004TC84Z8",
     "Московская Биржа": "BBG004730JJ5",
     "Башнефть — привилегированные акции": "BBG004S686N0",
@@ -208,7 +210,6 @@ def get_rsi(client, figi, tf_name, interval):
 
     closes = [c.close.units + c.close.nano / 1e9 for c in candles]
 
-    # заменяем последнюю цену на актуальную
     try:
         last_price_resp = client.market_data.get_last_prices(figi=[figi])
         if last_price_resp.last_prices:
@@ -254,16 +255,3 @@ def index():
 if __name__ == "__main__":
     threading.Thread(target=refresh_cache, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
-
-
-
-
-
-
-
-
-
-
-
-
-
