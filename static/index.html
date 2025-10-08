@@ -52,14 +52,14 @@
       <button id="refreshBtn">Обновить данные</button>
       <span id="status"></span>
     </div>
-    <small>Нажми на заголовок ТФ для сортировки</small>
+    <small>Нажми на заголовок, чтобы отсортировать</small>
   </div>
 
   <div class="table-container">
     <table id="rsiTable">
       <thead>
         <tr>
-          <th>Инструмент</th>
+          <th id="th-name" class="th-sort" data-sort="name">Инструмент</th>
           <th id="th-5m" class="th-sort" data-tf="5m">5 минут</th>
           <th id="th-1h" class="th-sort" data-tf="1h">1 час</th>
           <th id="th-1d" class="th-sort" data-tf="1d">1 день</th>
@@ -97,14 +97,21 @@
       if (sortState.tf) {
         const tf = sortState.tf;
         const dir = sortState.dir === 'asc' ? 1 : -1;
-        names.sort((a, b) => {
-          const va = lastData[a][tf]?.RSI;
-          const vb = lastData[b][tf]?.RSI;
-          const na = (va === '-' || va === null || va === undefined) ? -Infinity : Number(va);
-          const nb = (vb === '-' || vb === null || vb === undefined) ? -Infinity : Number(vb);
-          if (na === nb) return a.localeCompare(b);
-          return (na - nb) * dir;
-        });
+
+        if (tf === 'name') {
+          // Сортировка по алфавиту
+          names.sort((a, b) => a.localeCompare(b) * dir);
+        } else {
+          // Сортировка по RSI
+          names.sort((a, b) => {
+            const va = lastData[a][tf]?.RSI;
+            const vb = lastData[b][tf]?.RSI;
+            const na = (va === '-' || va === null || va === undefined) ? -Infinity : Number(va);
+            const nb = (vb === '-' || vb === null || vb === undefined) ? -Infinity : Number(vb);
+            if (na === nb) return a.localeCompare(b);
+            return (na - nb) * dir;
+          });
+        }
       }
 
       for (const name of names) {
@@ -130,13 +137,20 @@
         tbody.appendChild(tr);
       }
 
+      // Убираем старые стрелки и ставим новые
       document.querySelectorAll('.th-sort').forEach(th => th.classList.remove('asc', 'desc'));
       if (sortState.tf) {
-        const th = document.querySelector(`.th-sort[data-tf="${sortState.tf}"]`);
+        const th = document.querySelector(
+          sortState.tf === 'name'
+            ? `#th-name`
+            : `.th-sort[data-tf="${sortState.tf}"]`
+        );
         if (th) th.classList.add(sortState.dir);
       }
     }
 
+    // Клики по заголовкам
+    document.getElementById('th-name').addEventListener('click', () => toggleSort('name'));
     document.getElementById('th-5m').addEventListener('click', () => toggleSort('5m'));
     document.getElementById('th-1h').addEventListener('click', () => toggleSort('1h'));
     document.getElementById('th-1d').addEventListener('click', () => toggleSort('1d'));
