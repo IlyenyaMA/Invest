@@ -88,6 +88,14 @@
       }
     }
 
+    // Определяем приоритет сортировки по алфавиту
+    function namePriority(name) {
+      const first = name.trim().charAt(0);
+      if (first.match(/[A-Za-z0-9]/)) return 0; // латиница или цифра — первыми
+      if (first.match(/[А-Яа-яЁё]/)) return 1; // кириллица — после
+      return 2; // всё остальное — в конце
+    }
+
     function renderTable() {
       const tbody = document.querySelector('#rsiTable tbody');
       tbody.innerHTML = '';
@@ -99,16 +107,21 @@
         const dir = sortState.dir === 'asc' ? 1 : -1;
 
         if (tf === 'name') {
-          // Сортировка по алфавиту
-          names.sort((a, b) => a.localeCompare(b) * dir);
+          // Сортировка: сначала латиница/цифры, потом кириллица
+          names.sort((a, b) => {
+            const pa = namePriority(a);
+            const pb = namePriority(b);
+            if (pa !== pb) return (pa - pb) * dir; // приоритет по группе
+            return a.localeCompare(b, 'ru') * dir; // алфавит внутри группы
+          });
         } else {
           // Сортировка по RSI
           names.sort((a, b) => {
             const va = lastData[a][tf]?.RSI;
             const vb = lastData[b][tf]?.RSI;
-            const na = (va === '-' || va === null || va === undefined) ? -Infinity : Number(va);
-            const nb = (vb === '-' || vb === null || vb === undefined) ? -Infinity : Number(vb);
-            if (na === nb) return a.localeCompare(b);
+            const na = (va === '-' || va == null) ? -Infinity : Number(va);
+            const nb = (vb === '-' || vb == null) ? -Infinity : Number(vb);
+            if (na === nb) return a.localeCompare(b, 'ru');
             return (na - nb) * dir;
           });
         }
@@ -122,7 +135,7 @@
         const tr = document.createElement('tr');
 
         function rsiClass(val) {
-          if (val === '-' || val === null || val === undefined) return '';
+          if (val === '-' || val == null) return '';
           if (val > 70) return 'rsi-high';
           if (val < 30) return 'rsi-low';
           return '';
@@ -137,7 +150,7 @@
         tbody.appendChild(tr);
       }
 
-      // Убираем старые стрелки и ставим новые
+      // стрелочки ↑↓
       document.querySelectorAll('.th-sort').forEach(th => th.classList.remove('asc', 'desc'));
       if (sortState.tf) {
         const th = document.querySelector(
@@ -166,9 +179,7 @@
     }
 
     document.getElementById('refreshBtn').addEventListener('click', fetchRSI);
-
     setInterval(fetchRSI, 5 * 60 * 1000);
-
     fetchRSI();
   </script>
 </body>
