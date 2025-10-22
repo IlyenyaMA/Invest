@@ -100,8 +100,8 @@ INSTRUMENTS = {
     "Мечел": "BBG004S68598",
     "РКК Энергия им.С.П.Королева": "BBG000LWNRP3",
     "Лента": "BBG0063FKTD9",
-    " Сибири": "BBG000VJMH65",
-    " Юга": "BBG000C7P5M7",
+    "Россети Сибири": "BBG000VJMH65",
+    "Россети Юга": "BBG000C7P5M7",
     "ОВК": "TCS90A0JVBT9",
     "Пермэнергосбыт": "BBG000MZL0Y6",
     "ДВМП": "BBG000QF1Q17",
@@ -255,3 +255,4 @@ def index():
 if __name__ == "__main__":
     threading.Thread(target=refresh_cache, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
+
