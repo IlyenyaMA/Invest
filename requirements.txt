@@ -1,5 +1,6 @@
 flask
 requests
+pandas
 tinkoff-investments
 gunicorn
 
