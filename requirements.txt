@@ -1,6 +1,6 @@
 flask
 requests
-pandas
-tinkoff-investments==0.2.0-beta59
+pandas==2.2.2
+tinkoff-investments
 gunicorn
 
