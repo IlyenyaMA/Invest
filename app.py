@@ -4,13 +4,15 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 import threading
 import time
-
+ 
 app = Flask(__name__, static_folder="static")
-
+ 
+# ------------------- НАСТРОЙКИ -------------------
 TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
-
+ 
+# пример сокращённого списка для теста (оставь свои инструменты)
 INSTRUMENTS = {
-  "Башнефть": "BBG004S68758",
+        "Башнефть": "BBG004S68758",
     "Трубная Металлургическая Компания": "BBG004TC84Z8",
     "Московская Биржа": "BBG004730JJ5",
     "Башнефть — привилегированные акции": "BBG004S686N0",
@@ -155,27 +157,25 @@ INSTRUMENTS = {
     "Хэдхантер": "TCS20A107662",
     "Озон фарма": "TCS00A109B25"
 }
-
+ 
 TIMEFRAMES = {
     "5m": CandleInterval.CANDLE_INTERVAL_5_MIN,
     "1h": CandleInterval.CANDLE_INTERVAL_HOUR,
     "1d": CandleInterval.CANDLE_INTERVAL_DAY,
 }
-
+ 
 LOOKBACK_DAYS = {
     "5m": 7,
     "1h": 10,
     "1d": 365
 }
-
+ 
 RSI_PERIOD = 14
 REFRESH_SECONDS = 60
-
 RSI_CACHE = {}
 CACHE_LOCK = threading.Lock()
-
-
-# ---------------- RSI ----------------
+ 
+# ------------------- HELPERS -------------------
 def rsi(series, period=RSI_PERIOD):
     delta = series.diff()
     up = delta.clip(lower=0)
@@ -184,13 +184,15 @@ def rsi(series, period=RSI_PERIOD):
     roll_down = down.ewm(alpha=1/period, adjust=False).mean()
     rs = roll_up / roll_down
     return 100 - (100 / (1 + rs))
-
-
-# ---------------- RSI CALC ----------------
+ 
+def get_days_for_interval(tf_name):
+    return LOOKBACK_DAYS.get(tf_name, 30)
+ 
 def get_rsi(client, figi, tf_name, interval):
+    days = get_days_for_interval(tf_name)
     now = datetime.now(timezone.utc)
-    start = now - timedelta(days=LOOKBACK_DAYS.get(tf_name, 30))
-
+    start = now - timedelta(days=days)
+ 
     try:
         candles_resp = client.market_data.get_candles(
             figi=figi,
@@ -200,88 +202,56 @@ def get_rsi(client, figi, tf_name, interval):
         )
         candles = candles_resp.candles
     except Exception as e:
-        print("RSI error:", e)
+        print(f"[ERROR] FIGI {figi} ({tf_name}): {e}")
         return None
-
+ 
     if not candles or len(candles) < RSI_PERIOD:
         return None
-
+ 
     closes = [c.close.units + c.close.nano / 1e9 for c in candles]
-
+ 
     try:
-        last_price = client.market_data.get_last_prices(figi=[figi]).last_prices
-        if last_price:
-            closes[-1] = (
-                last_price[0].price.units +
-                last_price[0].price.nano / 1e9
+        last_price_resp = client.market_data.get_last_prices(figi=[figi])
+        if last_price_resp.last_prices:
+            current_price = (
+                last_price_resp.last_prices[0].price.units
+                + last_price_resp.last_prices[0].price.nano / 1e9
             )
-    except:
-        pass
-
-    return round(rsi(pd.Series(closes)).iloc[-1], 2)
-
-
-# ---------------- ORDERBOOK RATIO ----------------
-def get_ob_ratio(client, figi):
-    try:
-        ob = client.market_data.get_order_book(figi=figi, depth=20)
-
-        bid = sum(x.quantity for x in ob.bids)
-        ask = sum(x.quantity for x in ob.asks)
-
-        if bid == 0:
-            return None
-
-        return round(ask / bid, 2)
-
+            closes[-1] = current_price
     except Exception as e:
-        print("OB error:", e)
-        return None
-
-
-# ---------------- CACHE ----------------
+        print(f"[WARN] Не удалось получить last_price для {figi}: {e}")
+ 
+    rsi_val = round(rsi(pd.Series(closes)).iloc[-1], 2)
+    return rsi_val
+ 
+# ------------------- Фоновое обновление кэша -------------------
 def refresh_cache():
     global RSI_CACHE
-
     while True:
         new_cache = {}
-
         with Client(TOKEN) as client:
             for name, figi in INSTRUMENTS.items():
-
                 row = {}
-
-                # orderbook ratio
-                ratio = get_ob_ratio(client, figi)
-                row["ob"] = ratio if ratio is not None else "-"
-
-                # RSI
                 for tf_name, interval in TIMEFRAMES.items():
                     val = get_rsi(client, figi, tf_name, interval)
                     row[tf_name] = {"RSI": val if val is not None else "-"}
-
                 new_cache[name] = row
-
         with CACHE_LOCK:
             RSI_CACHE = new_cache
-
-        print("Cache updated")
+        print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] Cache updated")
         time.sleep(REFRESH_SECONDS)
-
-
-# ---------------- API ----------------
+ 
+# ------------------- Маршруты -------------------
 @app.route("/api/rsi")
-def api():
+def api_rsi():
     with CACHE_LOCK:
         return jsonify(RSI_CACHE)
-
-
+ 
 @app.route("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
-
-
-# ---------------- RUN ----------------
+ 
+# ------------------- MAIN -------------------
 if __name__ == "__main__":
     threading.Thread(target=refresh_cache, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
