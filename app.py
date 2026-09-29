@@ -6,11 +6,9 @@ import threading
 import time
  
 app = Flask(__name__, static_folder="static")
+
  
-# ------------------- НАСТРОЙКИ -------------------
-TOKEN = "t.a_yTo2QKdKX0FFwrNTmkvlKAfBml74hg7SVdW-GbyAVhY5znKubj2meA61ufoYGu_awUxQvozh07QHBrY3OgZA"
- 
-# пример сокращённого списка для теста (оставь свои инструменты)
+# список инструментов
 INSTRUMENTS = {
         "Башнефть": "BBG004S68758",
     "Трубная Металлургическая Компания": "BBG004TC84Z8",
